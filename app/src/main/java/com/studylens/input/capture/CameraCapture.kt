@@ -69,7 +69,7 @@ class CameraCapture(private val context: Context) {
     suspend fun captureFrame(): Bitmap? = withContext(Dispatchers.IO) {
         val capture = imageCapture ?: return@withContext generateFallbackBitmap("Sample Textbook Page\nCalculus: Integration by Parts\n∫ u dv = uv - ∫ v du")
 
-        suspendCancellableCoroutine { continuation ->
+        suspendCancellableCoroutine<Bitmap?> { continuation ->
             capture.takePicture(
                 ContextCompat.getMainExecutor(context),
                 object : ImageCapture.OnImageCapturedCallback() {
