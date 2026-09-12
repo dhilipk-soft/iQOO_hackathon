@@ -53,8 +53,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import com.studylens.input.ocr.ReadabilityAssessment
 import com.studylens.input.ocr.TextExtractor
 import com.studylens.shared.ExplanationResult
 import com.studylens.shared.InferenceStats
@@ -62,8 +65,16 @@ import com.studylens.ui.FollowUpMessage
 import com.studylens.ui.StudyTopicSession
 import java.io.File
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+sealed interface ReadabilityUiState {
+    val photoUri: Uri?
+    val isCamera: Boolean
+    data class Analyzing(override val photoUri: Uri?, override val isCamera: Boolean) : ReadabilityUiState
+    data class Result(val assessment: ReadabilityAssessment, override val photoUri: Uri?, override val isCamera: Boolean) : ReadabilityUiState
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -100,6 +111,9 @@ fun StudyChatScreen(
     var attachedImageUri by remember { mutableStateOf<Uri?>(null) }
     val textExtractor = remember { TextExtractor() }
 
+    // "Can I Read This?" Quality Check state
+    var readabilityState by remember { mutableStateOf<ReadabilityUiState?>(null) }
+
     // Temporary photo file for Camera capture
     val photoFile = remember {
         File(context.cacheDir, "studylens_camera_photo.jpg").apply {
@@ -116,36 +130,62 @@ fun StudyChatScreen(
         }
     }
 
-    // Camera Capture Launcher (opens camera and takes picture)
+    // Camera Capture Launcher (opens camera and evaluates readability)
     val cameraLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.TakePicture()
     ) { success ->
         if (success) {
             attachedImageUri = photoUri
             isProcessingOcr = true
-            ocrStatusText = "Scanning photo with on-device OCR..."
+            ocrStatusText = "Reading your page with on-device OCR..."
+            readabilityState = ReadabilityUiState.Analyzing(photoUri, isCamera = true)
             scope.launch(Dispatchers.IO) {
                 try {
+                    delay(450)
                     val rawBitmap = BitmapFactory.decodeFile(photoFile.absolutePath)
                     if (rawBitmap != null) {
                         val correctedBitmap = rotateBitmapIfRequired(photoFile.absolutePath, rawBitmap)
-                        val extracted = textExtractor.extractText(correctedBitmap)
+                        val assessment = textExtractor.assessReadability(correctedBitmap)
                         withContext(Dispatchers.Main) {
                             isProcessingOcr = false
-                            if (extracted.isNotBlank()) {
-                                inputText = extracted
-                            } else {
-                                inputText = "3.2 Quadratic Equations\nax² + bx + c = 0, where a ≠ 0\nFind the roots using quadratic formula: x = (-b ± √(b² - 4ac)) / 2a"
-                            }
+                            readabilityState = ReadabilityUiState.Result(assessment, photoUri, isCamera = true)
                         }
                     } else {
                         withContext(Dispatchers.Main) {
                             isProcessingOcr = false
+                            readabilityState = ReadabilityUiState.Result(
+                                ReadabilityAssessment(
+                                    isReadable = false,
+                                    score = 22,
+                                    text = "",
+                                    textDetected = false,
+                                    pageAligned = false,
+                                    lineCount = 0,
+                                    wordCount = 0,
+                                    tips = listOf("Move closer to the page", "Avoid glare and harsh shadows", "Keep the page flat and steady")
+                                ),
+                                photoUri,
+                                isCamera = true
+                            )
                         }
                     }
                 } catch (e: Exception) {
                     withContext(Dispatchers.Main) {
                         isProcessingOcr = false
+                        readabilityState = ReadabilityUiState.Result(
+                            ReadabilityAssessment(
+                                isReadable = false,
+                                score = 18,
+                                text = "",
+                                textDetected = false,
+                                pageAligned = false,
+                                lineCount = 0,
+                                wordCount = 0,
+                                tips = listOf("Move closer to the page", "Avoid glare and harsh shadows", "Keep the page flat and steady")
+                            ),
+                            photoUri,
+                            isCamera = true
+                        )
                     }
                 }
             }
@@ -161,7 +201,7 @@ fun StudyChatScreen(
         }
     }
 
-    // Gallery Picker Launcher (opens device gallery)
+    // Gallery Picker Launcher (opens device gallery and evaluates readability)
     val galleryLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
@@ -169,8 +209,10 @@ fun StudyChatScreen(
             attachedImageUri = uri
             isProcessingOcr = true
             ocrStatusText = "Reading gallery image with on-device OCR..."
+            readabilityState = ReadabilityUiState.Analyzing(uri, isCamera = false)
             scope.launch(Dispatchers.IO) {
                 try {
+                    delay(450)
                     val bitmap = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                         val source = ImageDecoder.createSource(context.contentResolver, uri)
                         ImageDecoder.decodeBitmap(source) { decoder, _, _ ->
@@ -183,23 +225,47 @@ fun StudyChatScreen(
                     }
 
                     if (bitmap != null) {
-                        val extracted = textExtractor.extractText(bitmap)
+                        val assessment = textExtractor.assessReadability(bitmap)
                         withContext(Dispatchers.Main) {
                             isProcessingOcr = false
-                            if (extracted.isNotBlank()) {
-                                inputText = extracted
-                            } else {
-                                inputText = "Calculus: Integration by Parts\nFormula: ∫ u dv = uv - ∫ v du"
-                            }
+                            readabilityState = ReadabilityUiState.Result(assessment, uri, isCamera = false)
                         }
                     } else {
                         withContext(Dispatchers.Main) {
                             isProcessingOcr = false
+                            readabilityState = ReadabilityUiState.Result(
+                                ReadabilityAssessment(
+                                    isReadable = false,
+                                    score = 24,
+                                    text = "",
+                                    textDetected = false,
+                                    pageAligned = false,
+                                    lineCount = 0,
+                                    wordCount = 0,
+                                    tips = listOf("Move closer to the page", "Avoid glare and harsh shadows", "Keep the page flat and steady")
+                                ),
+                                uri,
+                                isCamera = false
+                            )
                         }
                     }
                 } catch (e: Exception) {
                     withContext(Dispatchers.Main) {
                         isProcessingOcr = false
+                        readabilityState = ReadabilityUiState.Result(
+                            ReadabilityAssessment(
+                                isReadable = false,
+                                score = 15,
+                                text = "",
+                                textDetected = false,
+                                pageAligned = false,
+                                lineCount = 0,
+                                wordCount = 0,
+                                tips = listOf("Move closer to the page", "Avoid glare and harsh shadows", "Keep the page flat and steady")
+                            ),
+                            uri,
+                            isCamera = false
+                        )
                     }
                 }
             }
@@ -751,9 +817,66 @@ fun StudyChatScreen(
                                 inputText = promptText
                                 onAskQuestion(promptText)
                             },
+                            onTestLowReadability = {
+                                showMediaSheet = false
+                                readabilityState = ReadabilityUiState.Result(
+                                    assessment = ReadabilityAssessment(
+                                        isReadable = false,
+                                        score = 24,
+                                        text = "",
+                                        textDetected = false,
+                                        pageAligned = false,
+                                        lineCount = 0,
+                                        wordCount = 0,
+                                        tips = listOf("Move closer", "Avoid glare", "Keep the page flat")
+                                    ),
+                                    photoUri = null,
+                                    isCamera = true
+                                )
+                            },
                             onDismiss = { showMediaSheet = false }
                         )
                     }
+                }
+
+                // "Can I Read This?" On-Device OCR Readability Assessment Dialog
+                readabilityState?.let { state ->
+                    CanIReadThisDialog(
+                        state = state,
+                        onContinue = { text ->
+                            readabilityState = null
+                            inputText = text
+                            onAskQuestion(text)
+                        },
+                        onRetake = {
+                            readabilityState = null
+                            if (state.isCamera) {
+                                startCameraCapture()
+                            } else {
+                                galleryLauncher.launch("image/*")
+                            }
+                        },
+                        onUseSample = {
+                            val sampleText = "3.2 Quadratic Equations\nax² + bx + c = 0, where a ≠ 0\nFind the roots using quadratic formula: x = (-b ± √(b² - 4ac)) / 2a"
+                            readabilityState = ReadabilityUiState.Result(
+                                assessment = ReadabilityAssessment(
+                                    isReadable = true,
+                                    score = 92,
+                                    text = sampleText,
+                                    textDetected = true,
+                                    pageAligned = true,
+                                    lineCount = 3,
+                                    wordCount = 18,
+                                    tips = emptyList()
+                                ),
+                                photoUri = state.photoUri,
+                                isCamera = state.isCamera
+                            )
+                        },
+                        onDismiss = {
+                            readabilityState = null
+                        }
+                    )
                 }
             }
         }
@@ -1284,6 +1407,7 @@ fun MediaPickerContent(
     onTakePhoto: () -> Unit,
     onPickGallery: () -> Unit,
     onSelectPreset: (String, String) -> Unit,
+    onTestLowReadability: () -> Unit,
     onDismiss: () -> Unit
 ) {
     Column(
@@ -1446,6 +1570,41 @@ fun MediaPickerContent(
             }
         }
 
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // Demo Readability Check Failure / Retake flow
+        Surface(
+            onClick = onTestLowReadability,
+            modifier = Modifier.fillMaxWidth(),
+            color = Color(0xFFFEF2F2),
+            shape = RoundedCornerShape(12.dp),
+            border = ButtonDefaults.outlinedButtonBorder.copy(
+                brush = Brush.horizontalGradient(listOf(Color(0xFFFECACA), Color(0xFFF87171))),
+                width = 1.dp
+            )
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(text = "🧪", fontSize = 16.sp)
+                Spacer(modifier = Modifier.width(8.dp))
+                Column {
+                    Text(
+                        text = "Demo Glare / Blurry Failure State",
+                        color = Color(0xFF991B1B),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "Tests 'Couldn't clearly read this page' with tips & Retake",
+                        color = Color(0xFFB91C1C),
+                        fontSize = 10.sp
+                    )
+                }
+            }
+        }
+
         Spacer(modifier = Modifier.height(20.dp))
     }
 }
@@ -1528,5 +1687,501 @@ fun DrawerBookLogoIcon(size: androidx.compose.ui.unit.Dp = 22.dp) {
             close()
         }
         drawPath(rightPage, color = color, style = Stroke(width = strokeW))
+    }
+}
+
+@Composable
+fun CanIReadThisDialog(
+    state: ReadabilityUiState,
+    onContinue: (String) -> Unit,
+    onRetake: () -> Unit,
+    onUseSample: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 24.dp),
+            shape = RoundedCornerShape(24.dp),
+            color = Color.White,
+            shadowElevation = 16.dp,
+            border = ButtonDefaults.outlinedButtonBorder.copy(
+                brush = Brush.verticalGradient(
+                    listOf(Color(0xFFEEF2FF), Color(0xFFE0E7FF))
+                ),
+                width = 1.5.dp
+            )
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(22.dp)
+            ) {
+                // Header Bar
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .background(Color(0xFFEEF2FF), shape = CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(text = "📖", fontSize = 18.sp)
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                text = "Can I Read This?",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 17.sp,
+                                color = Color(0xFF1E1B4B)
+                            )
+                            Text(
+                                text = "On-Device OCR Quality Check",
+                                fontSize = 11.sp,
+                                color = Color(0xFF64748B)
+                            )
+                        }
+                    }
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.size(30.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Close",
+                            tint = Color(0xFF94A3B8),
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                when (state) {
+                    is ReadabilityUiState.Analyzing -> {
+                        // After capture: Page captured & Reading state
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(20.dp)
+                                    .background(Color(0xFFECFDF5), shape = CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "✓",
+                                    color = Color(0xFF059669),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Page captured",
+                                color = Color(0xFF059669),
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                color = Color(0xFF4F46E5),
+                                strokeWidth = 2.5.dp
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                text = "Reading your page...",
+                                color = Color(0xFF4F46E5),
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 14.sp
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(14.dp))
+                        HorizontalDivider(color = Color(0xFFE2E8F0), thickness = 1.dp)
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        Text(
+                            text = "Readability",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp,
+                            color = Color(0xFF64748B)
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        LinearProgressIndicator(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(8.dp)
+                                .clip(RoundedCornerShape(4.dp)),
+                            color = Color(0xFF818CF8),
+                            trackColor = Color(0xFFEEF2FF)
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Text(
+                            text = "Evaluating text density, alignment & contrast...",
+                            color = Color(0xFF94A3B8),
+                            fontSize = 12.sp
+                        )
+                    }
+
+                    is ReadabilityUiState.Result -> {
+                        val assessment = state.assessment
+                        if (assessment.isReadable) {
+                            // High Readability - Success State
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(20.dp)
+                                        .background(Color(0xFFECFDF5), shape = CircleShape),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "✓",
+                                        color = Color(0xFF059669),
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Page captured",
+                                    color = Color(0xFF059669),
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(12.dp))
+                            HorizontalDivider(color = Color(0xFFE2E8F0), thickness = 1.dp)
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            // Readability Header & Percentage
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = "Readability",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 15.sp,
+                                    color = Color(0xFF1E1B4B)
+                                )
+                                Text(
+                                    text = "${assessment.score}%",
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontSize = 17.sp,
+                                    color = Color(0xFF4F46E5)
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(8.dp))
+                            ReadabilityBlockBar(score = assessment.score, isGood = true)
+
+                            Spacer(modifier = Modifier.height(16.dp))
+
+                            // Verified checks
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(20.dp)
+                                        .background(Color(0xFFECFDF5), shape = CircleShape),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "✓",
+                                        color = Color(0xFF059669),
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text(
+                                    text = "Text detected",
+                                    color = Color(0xFF1E1B4B),
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 14.sp
+                                )
+                                Spacer(modifier = Modifier.weight(1f))
+                                Text(
+                                    text = "${assessment.wordCount} words",
+                                    color = Color(0xFF64748B),
+                                    fontSize = 12.sp
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(20.dp)
+                                        .background(Color(0xFFECFDF5), shape = CircleShape),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "✓",
+                                        color = Color(0xFF059669),
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text(
+                                    text = "Page aligned",
+                                    color = Color(0xFF1E1B4B),
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 14.sp
+                                )
+                                Spacer(modifier = Modifier.weight(1f))
+                                Text(
+                                    text = "${assessment.lineCount} lines",
+                                    color = Color(0xFF64748B),
+                                    fontSize = 12.sp
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(14.dp))
+
+                            // Detected text preview snippet
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = Color(0xFFF8F9FE),
+                                border = ButtonDefaults.outlinedButtonBorder.copy(
+                                    brush = Brush.horizontalGradient(
+                                        listOf(Color(0xFFEEF2FF), Color(0xFFE0E7FF))
+                                    ),
+                                    width = 1.dp
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = "\"${assessment.text.take(110).trim()}${if (assessment.text.length > 110) "..." else ""}\"",
+                                    fontSize = 12.sp,
+                                    color = Color(0xFF475569),
+                                    maxLines = 2,
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(20.dp))
+
+                            Button(
+                                onClick = { onContinue(assessment.text) },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4F46E5)),
+                                shape = RoundedCornerShape(14.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(48.dp)
+                            ) {
+                                Text(
+                                    text = "Continue",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 15.sp,
+                                    color = Color.White
+                                )
+                            }
+                        } else {
+                            // Low Readability - Failure & Guidance State
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(24.dp)
+                                        .background(Color(0xFFFEF2F2), shape = CircleShape),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "✕",
+                                        color = Color(0xFFDC2626),
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text(
+                                    text = "Couldn't clearly read this page.",
+                                    color = Color(0xFF1E1B4B),
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 16.sp
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(12.dp))
+                            HorizontalDivider(color = Color(0xFFE2E8F0), thickness = 1.dp)
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            // Readability Header & Percentage
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = "Readability",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp,
+                                    color = Color(0xFF64748B)
+                                )
+                                Text(
+                                    text = "${assessment.score}%",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 15.sp,
+                                    color = Color(0xFFDC2626)
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(8.dp))
+                            ReadabilityBlockBar(score = assessment.score, isGood = false)
+
+                            Spacer(modifier = Modifier.height(16.dp))
+
+                            // Guidance Box
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                color = Color(0xFFFFFBEB),
+                                border = ButtonDefaults.outlinedButtonBorder.copy(
+                                    brush = Brush.horizontalGradient(
+                                        listOf(Color(0xFFFEF3C7), Color(0xFFFDE68A))
+                                    ),
+                                    width = 1.dp
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(14.dp)) {
+                                    Text(
+                                        text = "Try:",
+                                        color = Color(0xFF92400E),
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 13.sp
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = "• Move closer",
+                                        color = Color(0xFF92400E),
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                    Text(
+                                        text = "• Avoid glare",
+                                        color = Color(0xFF92400E),
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                    Text(
+                                        text = "• Keep the page flat",
+                                        color = Color(0xFF92400E),
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(18.dp))
+
+                            Button(
+                                onClick = onRetake,
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4F46E5)),
+                                shape = RoundedCornerShape(14.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(48.dp)
+                            ) {
+                                Text(
+                                    text = "Retake",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 15.sp,
+                                    color = Color.White
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            OutlinedButton(
+                                onClick = onUseSample,
+                                shape = RoundedCornerShape(14.dp),
+                                border = ButtonDefaults.outlinedButtonBorder.copy(
+                                    brush = Brush.horizontalGradient(
+                                        listOf(Color(0xFFC7D2FE), Color(0xFF818CF8))
+                                    )
+                                ),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(44.dp)
+                            ) {
+                                Text(
+                                    text = "Use Sample Textbook Page",
+                                    fontSize = 13.sp,
+                                    color = Color(0xFF4F46E5),
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ReadabilityBlockBar(score: Int, isGood: Boolean) {
+    val fillFraction = (score / 100f).coerceIn(0f, 1f)
+    val totalBlocks = 10
+    val filledCount = (fillFraction * totalBlocks).toInt().coerceIn(0, totalBlocks)
+    val emptyCount = totalBlocks - filledCount
+    val blockText = "█".repeat(filledCount) + "░".repeat(emptyCount)
+
+    Column {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(10.dp)
+                .background(Color(0xFFF1F5F9), shape = RoundedCornerShape(5.dp))
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(fillFraction)
+                    .fillMaxHeight()
+                    .background(
+                        if (isGood) Brush.horizontalGradient(listOf(Color(0xFF818CF8), Color(0xFF4F46E5)))
+                        else Brush.horizontalGradient(listOf(Color(0xFFF87171), Color(0xFFDC2626))),
+                        shape = RoundedCornerShape(5.dp)
+                    )
+            )
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = blockText,
+                fontFamily = FontFamily.Monospace,
+                fontSize = 13.sp,
+                color = if (isGood) Color(0xFF4F46E5) else Color(0xFFDC2626),
+                letterSpacing = 1.sp
+            )
+            Text(
+                text = "$score%",
+                fontFamily = FontFamily.Monospace,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                color = if (isGood) Color(0xFF4F46E5) else Color(0xFFDC2626)
+            )
+        }
     }
 }
