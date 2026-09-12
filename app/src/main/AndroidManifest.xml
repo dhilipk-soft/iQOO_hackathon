@@ -11,6 +11,11 @@
         android:name="android.permission.PACKAGE_USAGE_STATS"
         tools:ignore="ProtectedPermissions" />
 
+    <!-- For the model-download background job (survives navigating away/backgrounding) -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 
     <queries>
@@ -44,6 +49,15 @@
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
         </service>
+
+        <!-- WorkManager's own SystemForegroundService doesn't declare a foregroundServiceType
+             by default, but our download worker calls setForeground() with dataSync - Android
+             rejects that combination at runtime ("not a subset of ... 0x00000000") and crashes
+             the whole process. This override merges dataSync onto WorkManager's service. -->
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="dataSync"
+            tools:node="merge" />
 
         <provider
             android:name="androidx.core.content.FileProvider"

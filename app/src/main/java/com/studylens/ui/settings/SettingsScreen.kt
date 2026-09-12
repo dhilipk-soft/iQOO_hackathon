@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.sp
 
 @Composable
 fun SettingsScreen(
+    onNavigateToModelPicker: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -62,6 +63,15 @@ fun SettingsScreen(
             shadowElevation = 1.dp
         ) {
             Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                SettingsRowItem(
+                    iconBg = Color(0xFFEDE9FE),
+                    icon = "🧠",
+                    title = "Choose AI Model",
+                    onClick = onNavigateToModelPicker
+                )
+
+                HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
+
                 SettingsRowItem(
                     iconBg = Color(0xFFEEF2FF),
                     icon = "ℹ️",
