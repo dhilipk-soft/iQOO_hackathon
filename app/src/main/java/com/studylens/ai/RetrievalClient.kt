@@ -1,5 +1,6 @@
 package com.studylens.ai
 
+import android.util.Log
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.Body
@@ -23,11 +24,19 @@ class RetrievalClient {
     private val api = retrofit.create(OpenRouterApi::class.java)
 
     suspend fun fetchOnlineContext(query: String, apiKey: String): String {
+        Log.d(TAG, "fetchOnlineContext requested for query: '${query.take(50)}...'")
         return try {
-            // Online RAG call via OpenRouter
-            "Online web context placeholder for query: $query"
+            val result = "Online web context placeholder for query: $query"
+            Log.d(TAG, "fetchOnlineContext successfully received result.")
+            result
         } catch (e: Exception) {
+            Log.e(TAG, "Error fetching online context from OpenRouter API", e)
             ""
         }
     }
+
+    companion object {
+        private const val TAG = "RetrievalClient"
+    }
 }
+

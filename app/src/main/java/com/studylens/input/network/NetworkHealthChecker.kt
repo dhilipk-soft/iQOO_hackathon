@@ -5,6 +5,7 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
+import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -27,16 +28,19 @@ class NetworkHealthChecker(private val context: Context) {
 
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
+            Log.d(TAG, "NetworkCallback: Network available, probing connectivity...")
             probeAndUpdate()
         }
 
         override fun onLost(network: Network) {
+            Log.d(TAG, "NetworkCallback: Network lost -> setting isOnline = false")
             _isOnline.value = false
         }
 
         override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
             val hasInternet = capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
             if (!hasInternet) {
+                Log.d(TAG, "NetworkCallback: NET_CAPABILITY_INTERNET missing -> setting isOnline = false")
                 _isOnline.value = false
             } else {
                 probeAndUpdate()
@@ -50,19 +54,24 @@ class NetworkHealthChecker(private val context: Context) {
                 .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
                 .build()
             connectivityManager.registerNetworkCallback(request, networkCallback)
+            Log.d(TAG, "Registered NetworkCallback for active network tracking.")
         } catch (e: Exception) {
-            // Fallback for restricted environments
+            Log.e(TAG, "Failed to register NetworkCallback", e)
         }
         probeAndUpdate()
     }
 
     fun triggerRefresh() {
+        Log.d(TAG, "Manual network probe trigger requested.")
         probeAndUpdate()
     }
 
     private fun probeAndUpdate() {
         scope.launch {
             val reallyOnline = isReallyOnline()
+            if (_isOnline.value != reallyOnline) {
+                Log.i(TAG, "Network status changed: isOnline = $reallyOnline")
+            }
             _isOnline.value = reallyOnline
         }
     }
@@ -74,9 +83,16 @@ class NetworkHealthChecker(private val context: Context) {
      */
     suspend fun isReallyOnline(): Boolean = withContext(Dispatchers.IO) {
         try {
-            val activeNetwork = connectivityManager.activeNetwork ?: return@withContext false
-            val capabilities = connectivityManager.getNetworkCapabilities(activeNetwork) ?: return@withContext false
+            val activeNetwork = connectivityManager.activeNetwork ?: run {
+                Log.d(TAG, "isReallyOnline: No active network found.")
+                return@withContext false
+            }
+            val capabilities = connectivityManager.getNetworkCapabilities(activeNetwork) ?: run {
+                Log.d(TAG, "isReallyOnline: No network capabilities found.")
+                return@withContext false
+            }
             if (!capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) {
+                Log.d(TAG, "isReallyOnline: NET_CAPABILITY_INTERNET false.")
                 return@withContext false
             }
 
@@ -90,12 +106,21 @@ class NetworkHealthChecker(private val context: Context) {
                 requestMethod = "GET"
             }
             try {
-                conn.responseCode == 204
+                val code = conn.responseCode
+                val success = code == 204
+                Log.d(TAG, "isReallyOnline: HTTP probe response code = $code, online = $success")
+                success
             } finally {
                 conn.disconnect()
             }
         } catch (e: Exception) {
+            Log.d(TAG, "isReallyOnline: Probe exception: ${e.message}")
             false
         }
     }
+
+    companion object {
+        private const val TAG = "NetworkHealthChecker"
+    }
 }
+

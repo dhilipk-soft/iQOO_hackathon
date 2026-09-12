@@ -84,4 +84,7 @@ dependencies {
 
     // Coroutines (everyone)
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+
+    // Local Testing
+    testImplementation("junit:junit:4.13.2")
 }

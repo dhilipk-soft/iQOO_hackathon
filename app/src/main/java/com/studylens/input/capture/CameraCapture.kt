@@ -7,6 +7,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Matrix
 import android.graphics.Paint
+import android.util.Log
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
@@ -21,7 +22,6 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import java.nio.ByteBuffer
 import kotlin.coroutines.resume
-import kotlin.coroutines.resumeWithException
 
 class CameraCapture(private val context: Context) {
 
@@ -32,6 +32,7 @@ class CameraCapture(private val context: Context) {
         lifecycleOwner: LifecycleOwner,
         previewView: PreviewView
     ): Boolean = withContext(Dispatchers.Main) {
+        Log.d(TAG, "Binding CameraX preview and ImageCapture use cases...")
         suspendCancellableCoroutine { continuation ->
             val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
             cameraProviderFuture.addListener({
@@ -58,8 +59,10 @@ class CameraCapture(private val context: Context) {
                         imageCapture
                     )
 
+                    Log.d(TAG, "CameraX successfully bound to lifecycle.")
                     continuation.resume(true)
                 } catch (e: Exception) {
+                    Log.e(TAG, "Failed to bind CameraX to lifecycle", e)
                     continuation.resume(false)
                 }
             }, ContextCompat.getMainExecutor(context))
@@ -67,17 +70,23 @@ class CameraCapture(private val context: Context) {
     }
 
     suspend fun captureFrame(): Bitmap? = withContext(Dispatchers.IO) {
-        val capture = imageCapture ?: return@withContext generateFallbackBitmap("Sample Textbook Page\nCalculus: Integration by Parts\n∫ u dv = uv - ∫ v du")
+        val capture = imageCapture ?: run {
+            Log.w(TAG, "ImageCapture is null, returning sample fallback bitmap.")
+            return@withContext generateFallbackBitmap("Sample Textbook Page\nCalculus: Integration by Parts\n∫ u dv = uv - ∫ v du")
+        }
 
+        Log.d(TAG, "Taking picture frame...")
         suspendCancellableCoroutine<Bitmap?> { continuation ->
             capture.takePicture(
                 ContextCompat.getMainExecutor(context),
                 object : ImageCapture.OnImageCapturedCallback() {
                     override fun onCaptureSuccess(image: ImageProxy) {
                         try {
+                            Log.d(TAG, "ImageProxy captured successfully (width=${image.width}, height=${image.height}).")
                             val bitmap = imageProxyToBitmap(image)
                             continuation.resume(bitmap)
                         } catch (e: Exception) {
+                            Log.e(TAG, "Failed to convert ImageProxy to Bitmap", e)
                             continuation.resume(null)
                         } finally {
                             image.close()
@@ -85,6 +94,7 @@ class CameraCapture(private val context: Context) {
                     }
 
                     override fun onError(exception: ImageCaptureException) {
+                        Log.e(TAG, "CameraX takePicture error: ${exception.imageCaptureError}", exception)
                         continuation.resume(null)
                     }
                 }
@@ -99,6 +109,7 @@ class CameraCapture(private val context: Context) {
         val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
 
         val rotationDegrees = image.imageInfo.rotationDegrees
+        Log.d(TAG, "ImageProxy converted to Bitmap: ${bitmap.width}x${bitmap.height}, rotation=$rotationDegrees")
         return if (rotationDegrees != 0) {
             val matrix = Matrix().apply { postRotate(rotationDegrees.toFloat()) }
             Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
@@ -108,6 +119,7 @@ class CameraCapture(private val context: Context) {
     }
 
     fun generateFallbackBitmap(sampleText: String): Bitmap {
+        Log.d(TAG, "Generating fallback bitmap for sample text...")
         val width = 800
         val height = 600
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
@@ -127,4 +139,9 @@ class CameraCapture(private val context: Context) {
         }
         return bitmap
     }
+
+    companion object {
+        private const val TAG = "CameraCapture"
+    }
 }
+
