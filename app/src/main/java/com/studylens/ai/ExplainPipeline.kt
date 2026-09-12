@@ -9,8 +9,11 @@ import com.studylens.shared.StudyCapture
 
 class ExplainPipeline(
     private val llmEngine: LlmEngine,
-    private val retrievalClient: RetrievalClient
+    private val retrievalClient: RetrievalClient,
+    private val learningTwinManager: LearningTwinManager? = null
 ) : StudyBrain {
+
+    var socraticModeEnabled: Boolean = true
 
     private fun appendCitations(text: String, citations: List<WebCitation>): String {
         if (citations.isEmpty()) return text
@@ -35,6 +38,9 @@ class ExplainPipeline(
         }
 
         val prompt = buildString {
+            if (learningTwinManager != null) {
+                append(learningTwinManager.buildTwinPromptContext(socraticModeEnabled))
+            }
             append("You are a patient tutor explaining to a student with limited internet access. ")
             if (image != null) {
                 append("Look at the attached image (a textbook page or handwritten problem) and ")
@@ -93,6 +99,9 @@ class ExplainPipeline(
         val trimmedContext = conversationContext.takeLast(1500)
 
         val prompt = buildString {
+            if (learningTwinManager != null) {
+                append(learningTwinManager.buildTwinPromptContext(socraticModeEnabled))
+            }
             append("You are continuing a tutoring conversation. Here is the conversation so far:\n")
             append("$trimmedContext\n\n")
             append("The student now asks: \"$question\"\n\n")

@@ -15,6 +15,7 @@ import com.studylens.shared.StudySession
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 
@@ -159,6 +160,55 @@ data class ChatMessageEntity(
     val timestamp: Long
 )
 
+// ----------------------------------------------------
+// Personal Learning Twin & Adaptive Engine Entities
+// ----------------------------------------------------
+
+data class StudentProfileEntity(
+    val id: String, // "student_a", "student_b"
+    val name: String,
+    val grade: String,
+    val learningStyle: String,
+    val strengths: String,
+    val weaknesses: String,
+    val isCurrent: Boolean = false
+)
+
+data class ConceptMasteryEntity(
+    val id: Long = 0,
+    val studentId: String,
+    val subject: String,
+    val topic: String,
+    val concept: String,
+    val masteryScore: Int, // 0..100
+    val attempts: Int,
+    val correctCount: Int,
+    val incorrectCount: Int,
+    val lastErrorType: String? = null,
+    val activeMisconception: String? = null,
+    val lastUpdated: Long = System.currentTimeMillis()
+)
+
+data class MisconceptionLogEntity(
+    val id: Long = 0,
+    val studentId: String,
+    val concept: String,
+    val mistakePattern: String,
+    val sampleAnswer: String,
+    val timestamp: Long = System.currentTimeMillis(),
+    val isResolved: Boolean = false
+)
+
+data class ExamPlanEntity(
+    val id: Long = 0,
+    val studentId: String,
+    val examName: String,
+    val daysRemaining: Int,
+    val dailyMinutes: Int,
+    val targetScore: Int,
+    val currentDayPlan: String // Pipe-separated or text breakdown
+)
+
 private fun List<String>.toDbString(): String = joinToString("|||")
 private fun String.toStringList(): List<String> = if (isBlank()) emptyList() else split("|||")
 
@@ -166,7 +216,7 @@ private fun String.toStringList(): List<String> = if (isBlank()) emptyList() els
 // SQLite schema
 // ----------------------------------------------------
 
-class DbHelper(context: Context) : SQLiteOpenHelper(context, "studylens_db", null, 2) {
+class DbHelper(context: Context) : SQLiteOpenHelper(context, "studylens_db", null, 3) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
             """CREATE TABLE study_captures (
@@ -261,6 +311,58 @@ class DbHelper(context: Context) : SQLiteOpenHelper(context, "studylens_db", nul
                 actionPlan TEXT NOT NULL DEFAULT ''
             )"""
         )
+
+        // Learning Twin & Exam Planner Tables
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS student_profiles (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                grade TEXT NOT NULL,
+                learningStyle TEXT NOT NULL,
+                strengths TEXT NOT NULL,
+                weaknesses TEXT NOT NULL,
+                isCurrent INTEGER NOT NULL DEFAULT 0
+            )"""
+        )
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS concept_mastery (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                studentId TEXT NOT NULL,
+                subject TEXT NOT NULL,
+                topic TEXT NOT NULL,
+                concept TEXT NOT NULL,
+                masteryScore INTEGER NOT NULL,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                correctCount INTEGER NOT NULL DEFAULT 0,
+                incorrectCount INTEGER NOT NULL DEFAULT 0,
+                lastErrorType TEXT,
+                activeMisconception TEXT,
+                lastUpdated INTEGER NOT NULL
+            )"""
+        )
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS misconception_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                studentId TEXT NOT NULL,
+                concept TEXT NOT NULL,
+                mistakePattern TEXT NOT NULL,
+                sampleAnswer TEXT NOT NULL,
+                timestamp INTEGER NOT NULL,
+                isResolved INTEGER NOT NULL DEFAULT 0
+            )"""
+        )
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS exam_plans (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                studentId TEXT NOT NULL,
+                examName TEXT NOT NULL,
+                daysRemaining INTEGER NOT NULL,
+                dailyMinutes INTEGER NOT NULL,
+                targetScore INTEGER NOT NULL,
+                currentDayPlan TEXT NOT NULL
+            )"""
+        )
+        seedLearningTwinData(db)
     }
 
     override fun onOpen(db: SQLiteDatabase) {
@@ -304,11 +406,96 @@ class DbHelper(context: Context) : SQLiteOpenHelper(context, "studylens_db", nul
                 actionPlan TEXT NOT NULL DEFAULT ''
             )"""
         )
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS student_profiles (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                grade TEXT NOT NULL,
+                learningStyle TEXT NOT NULL,
+                strengths TEXT NOT NULL,
+                weaknesses TEXT NOT NULL,
+                isCurrent INTEGER NOT NULL DEFAULT 0
+            )"""
+        )
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS concept_mastery (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                studentId TEXT NOT NULL,
+                subject TEXT NOT NULL,
+                topic TEXT NOT NULL,
+                concept TEXT NOT NULL,
+                masteryScore INTEGER NOT NULL,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                correctCount INTEGER NOT NULL DEFAULT 0,
+                incorrectCount INTEGER NOT NULL DEFAULT 0,
+                lastErrorType TEXT,
+                activeMisconception TEXT,
+                lastUpdated INTEGER NOT NULL
+            )"""
+        )
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS misconception_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                studentId TEXT NOT NULL,
+                concept TEXT NOT NULL,
+                mistakePattern TEXT NOT NULL,
+                sampleAnswer TEXT NOT NULL,
+                timestamp INTEGER NOT NULL,
+                isResolved INTEGER NOT NULL DEFAULT 0
+            )"""
+        )
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS exam_plans (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                studentId TEXT NOT NULL,
+                examName TEXT NOT NULL,
+                daysRemaining INTEGER NOT NULL,
+                dailyMinutes INTEGER NOT NULL,
+                targetScore INTEGER NOT NULL,
+                currentDayPlan TEXT NOT NULL
+            )"""
+        )
+        seedLearningTwinData(db)
+    }
+
+    private fun seedLearningTwinData(db: SQLiteDatabase) {
+        val countCursor = db.rawQuery("SELECT COUNT(*) FROM student_profiles", null)
+        var count = 0
+        if (countCursor.moveToFirst()) {
+            count = countCursor.getInt(0)
+        }
+        countCursor.close()
+        if (count > 0) return
+
+        // 1. Seed Student A (Aarav - Math/Analytical Strong)
+        db.execSQL(
+            """INSERT INTO student_profiles (id, name, grade, learningStyle, strengths, weaknesses, isCurrent)
+               VALUES ('student_a', 'Aarav Sharma', 'Class 10', 'Mathematical / Analytical', 'Fast arithmetic, formula manipulation, circuit diagrams', 'Physical intuition, verbal concept explanations', 0)"""
+        )
+        val now = System.currentTimeMillis()
+        db.execSQL("INSERT INTO concept_mastery (studentId, subject, topic, concept, masteryScore, attempts, correctCount, incorrectCount, lastErrorType, activeMisconception, lastUpdated) VALUES ('student_a', 'Physics', 'Electricity', 'Voltage', 92, 12, 11, 1, 'CALCULATION', NULL, $now)")
+        db.execSQL("INSERT INTO concept_mastery (studentId, subject, topic, concept, masteryScore, attempts, correctCount, incorrectCount, lastErrorType, activeMisconception, lastUpdated) VALUES ('student_a', 'Physics', 'Electricity', 'Current', 88, 10, 9, 1, 'CALCULATION', NULL, $now)")
+        db.execSQL("INSERT INTO concept_mastery (studentId, subject, topic, concept, masteryScore, attempts, correctCount, incorrectCount, lastErrorType, activeMisconception, lastUpdated) VALUES ('student_a', 'Physics', 'Electricity', 'Ohm''s Law', 85, 15, 13, 2, 'CALCULATION', NULL, $now)")
+        db.execSQL("INSERT INTO concept_mastery (studentId, subject, topic, concept, masteryScore, attempts, correctCount, incorrectCount, lastErrorType, activeMisconception, lastUpdated) VALUES ('student_a', 'Physics', 'Electricity', 'Resistance', 78, 14, 11, 3, 'UNIT_ERROR', NULL, $now)")
+
+        db.execSQL("INSERT INTO exam_plans (studentId, examName, daysRemaining, dailyMinutes, targetScore, currentDayPlan) VALUES ('student_a', 'CBSE Class 10 Physics Midterm', 12, 90, 95, '25m Advanced Circuits ||| 35m Joule Heating Practice ||| 20m Formula Speed Drill ||| 10m Review')")
+
+        // 2. Seed Student B (Priya - Conceptual Strong, Math/Formula Struggle)
+        db.execSQL(
+            """INSERT INTO student_profiles (id, name, grade, learningStyle, strengths, weaknesses, isCurrent)
+               VALUES ('student_b', 'Priya Patel', 'Class 10', 'Conceptual / Intuitive', 'Physical intuition, qualitative analogies, high curiosity', 'Formula algebra inversion, dividing in Ohm''s Law (R = V * I)', 1)"""
+        )
+        db.execSQL("INSERT INTO concept_mastery (studentId, subject, topic, concept, masteryScore, attempts, correctCount, incorrectCount, lastErrorType, activeMisconception, lastUpdated) VALUES ('student_b', 'Physics', 'Electricity', 'Voltage', 86, 8, 7, 1, 'CALCULATION', NULL, $now)")
+        db.execSQL("INSERT INTO concept_mastery (studentId, subject, topic, concept, masteryScore, attempts, correctCount, incorrectCount, lastErrorType, activeMisconception, lastUpdated) VALUES ('student_b', 'Physics', 'Electricity', 'Current', 80, 8, 6, 2, 'CALCULATION', NULL, $now)")
+        db.execSQL("INSERT INTO concept_mastery (studentId, subject, topic, concept, masteryScore, attempts, correctCount, incorrectCount, lastErrorType, activeMisconception, lastUpdated) VALUES ('student_b', 'Physics', 'Electricity', 'Ohm''s Law', 55, 10, 5, 5, 'FORMULA_INVERSION', 'Inverts V = I*R when calculating R', $now)")
+        db.execSQL("INSERT INTO concept_mastery (studentId, subject, topic, concept, masteryScore, attempts, correctCount, incorrectCount, lastErrorType, activeMisconception, lastUpdated) VALUES ('student_b', 'Physics', 'Electricity', 'Resistance', 32, 9, 3, 6, 'FORMULA_INVERSION', 'Multiplies V * I instead of V / I', $now)")
+
+        db.execSQL("INSERT INTO misconception_logs (studentId, concept, mistakePattern, sampleAnswer, timestamp, isResolved) VALUES ('student_b', 'Resistance', 'Inverted formula: uses R = V * I (multiplies 10V * 2A = 20 ohms)', '20 Ohms', $now, 0)")
+
+        db.execSQL("INSERT INTO exam_plans (studentId, examName, daysRemaining, dailyMinutes, targetScore, currentDayPlan) VALUES ('student_b', 'CBSE Class 10 Physics Midterm', 12, 60, 85, '20m Remedial Resistance Division ||| 20m Ohm''s Law Guided Socratic Practice ||| 15m Voltage Review ||| 5m Recap')")
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        // Matches the old fallbackToDestructiveMigration() behavior - fine for a hackathon
-        // prototype, no production user data to preserve across schema changes.
         db.execSQL("DROP TABLE IF EXISTS study_captures")
         db.execSQL("DROP TABLE IF EXISTS app_events")
         db.execSQL("DROP TABLE IF EXISTS notification_events")
@@ -317,6 +504,10 @@ class DbHelper(context: Context) : SQLiteOpenHelper(context, "studylens_db", nul
         db.execSQL("DROP TABLE IF EXISTS chat_messages")
         db.execSQL("DROP TABLE IF EXISTS focus_events")
         db.execSQL("DROP TABLE IF EXISTS focus_session_summaries")
+        db.execSQL("DROP TABLE IF EXISTS student_profiles")
+        db.execSQL("DROP TABLE IF EXISTS concept_mastery")
+        db.execSQL("DROP TABLE IF EXISTS misconception_logs")
+        db.execSQL("DROP TABLE IF EXISTS exam_plans")
         onCreate(db)
     }
 
@@ -755,6 +946,244 @@ class ChatDao(private val helper: DbHelper) {
     }
 }
 
+class LearningTwinDao(private val helper: DbHelper) {
+    private val _activeProfile = MutableStateFlow<StudentProfileEntity?>(null)
+    val activeProfileFlow: StateFlow<StudentProfileEntity?> = _activeProfile.asStateFlow()
+
+    private val _conceptMasteryList = MutableStateFlow<List<ConceptMasteryEntity>>(emptyList())
+    val conceptMasteryFlow: StateFlow<List<ConceptMasteryEntity>> = _conceptMasteryList.asStateFlow()
+
+    private val _misconceptionsList = MutableStateFlow<List<MisconceptionLogEntity>>(emptyList())
+    val misconceptionsFlow: StateFlow<List<MisconceptionLogEntity>> = _misconceptionsList.asStateFlow()
+
+    private val _activeExamPlan = MutableStateFlow<ExamPlanEntity?>(null)
+    val activeExamPlanFlow: StateFlow<ExamPlanEntity?> = _activeExamPlan.asStateFlow()
+
+    init {
+        refreshStateSafe()
+    }
+
+    fun refreshStateSafe() {
+        try {
+            val profile = queryActiveProfile()
+            _activeProfile.value = profile
+            if (profile != null) {
+                _conceptMasteryList.value = queryMastery(profile.id)
+                _misconceptionsList.value = queryMisconceptions(profile.id)
+                _activeExamPlan.value = queryExamPlan(profile.id)
+            }
+        } catch (e: Exception) {
+            // Tables might be initializing
+        }
+    }
+
+    suspend fun getActiveProfile(): StudentProfileEntity? = withContext(Dispatchers.IO) {
+        queryActiveProfile()
+    }
+
+    suspend fun getAllProfiles(): List<StudentProfileEntity> = withContext(Dispatchers.IO) {
+        val list = mutableListOf<StudentProfileEntity>()
+        helper.readableDatabase.rawQuery("SELECT * FROM student_profiles ORDER BY name ASC", null).use { c ->
+            while (c.moveToNext()) {
+                list.add(
+                    StudentProfileEntity(
+                        id = c.getString(c.getColumnIndexOrThrow("id")),
+                        name = c.getString(c.getColumnIndexOrThrow("name")),
+                        grade = c.getString(c.getColumnIndexOrThrow("grade")),
+                        learningStyle = c.getString(c.getColumnIndexOrThrow("learningStyle")),
+                        strengths = c.getString(c.getColumnIndexOrThrow("strengths")),
+                        weaknesses = c.getString(c.getColumnIndexOrThrow("weaknesses")),
+                        isCurrent = c.getInt(c.getColumnIndexOrThrow("isCurrent")) == 1
+                    )
+                )
+            }
+        }
+        list
+    }
+
+    suspend fun setActiveProfile(studentId: String) = withContext(Dispatchers.IO) {
+        helper.writableDatabase.beginTransaction()
+        try {
+            helper.writableDatabase.execSQL("UPDATE student_profiles SET isCurrent = 0")
+            helper.writableDatabase.execSQL("UPDATE student_profiles SET isCurrent = 1 WHERE id = ?", arrayOf(studentId))
+            helper.writableDatabase.setTransactionSuccessful()
+        } finally {
+            helper.writableDatabase.endTransaction()
+        }
+        refreshStateSafe()
+    }
+
+    suspend fun updateMastery(
+        conceptName: String,
+        delta: Int,
+        isCorrect: Boolean,
+        errorType: String? = null,
+        misconception: String? = null
+    ) = withContext(Dispatchers.IO) {
+        val currentProfile = _activeProfile.value ?: return@withContext
+        val list = queryMastery(currentProfile.id)
+        val target = list.firstOrNull { it.concept.equals(conceptName, ignoreCase = true) }
+        val now = System.currentTimeMillis()
+
+        if (target != null) {
+            val newScore = (target.masteryScore + delta).coerceIn(0, 100)
+            val newAttempts = target.attempts + 1
+            val newCorrect = target.correctCount + (if (isCorrect) 1 else 0)
+            val newIncorrect = target.incorrectCount + (if (isCorrect) 0 else 1)
+            val values = ContentValues().apply {
+                put("masteryScore", newScore)
+                put("attempts", newAttempts)
+                put("correctCount", newCorrect)
+                put("incorrectCount", newIncorrect)
+                if (errorType != null) put("lastErrorType", errorType)
+                if (misconception != null) put("activeMisconception", misconception)
+                put("lastUpdated", now)
+            }
+            helper.writableDatabase.update("concept_mastery", values, "id = ?", arrayOf(target.id.toString()))
+        }
+        refreshStateSafe()
+    }
+
+    suspend fun logMisconception(
+        concept: String,
+        mistakePattern: String,
+        sampleAnswer: String
+    ) = withContext(Dispatchers.IO) {
+        val currentProfile = _activeProfile.value ?: return@withContext
+        val values = ContentValues().apply {
+            put("studentId", currentProfile.id)
+            put("concept", concept)
+            put("mistakePattern", mistakePattern)
+            put("sampleAnswer", sampleAnswer)
+            put("timestamp", System.currentTimeMillis())
+            put("isResolved", 0)
+        }
+        helper.writableDatabase.insert("misconception_logs", null, values)
+        refreshStateSafe()
+    }
+
+    suspend fun resolveMisconception(concept: String) = withContext(Dispatchers.IO) {
+        val currentProfile = _activeProfile.value ?: return@withContext
+        helper.writableDatabase.execSQL(
+            "UPDATE misconception_logs SET isResolved = 1 WHERE studentId = ? AND concept = ?",
+            arrayOf(currentProfile.id, concept)
+        )
+        helper.writableDatabase.execSQL(
+            "UPDATE concept_mastery SET activeMisconception = NULL WHERE studentId = ? AND concept = ?",
+            arrayOf(currentProfile.id, concept)
+        )
+        refreshStateSafe()
+    }
+
+    suspend fun updateExamPlan(daysRemaining: Int, dailyMinutes: Int, planBreakdown: String) = withContext(Dispatchers.IO) {
+        val currentProfile = _activeProfile.value ?: return@withContext
+        val values = ContentValues().apply {
+            put("daysRemaining", daysRemaining)
+            put("dailyMinutes", dailyMinutes)
+            put("currentDayPlan", planBreakdown)
+        }
+        helper.writableDatabase.update("exam_plans", values, "studentId = ?", arrayOf(currentProfile.id))
+        refreshStateSafe()
+    }
+
+    suspend fun resetDemoData() = withContext(Dispatchers.IO) {
+        helper.writableDatabase.beginTransaction()
+        try {
+            helper.writableDatabase.execSQL("DELETE FROM student_profiles")
+            helper.writableDatabase.execSQL("DELETE FROM concept_mastery")
+            helper.writableDatabase.execSQL("DELETE FROM misconception_logs")
+            helper.writableDatabase.execSQL("DELETE FROM exam_plans")
+            helper.writableDatabase.setTransactionSuccessful()
+        } finally {
+            helper.writableDatabase.endTransaction()
+        }
+        // Force re-seed
+        val helperOnOpenMethod = DbHelper::class.java.getDeclaredMethod("seedLearningTwinData", SQLiteDatabase::class.java)
+        helperOnOpenMethod.isAccessible = true
+        helperOnOpenMethod.invoke(helper, helper.writableDatabase)
+        refreshStateSafe()
+    }
+
+    private fun queryActiveProfile(): StudentProfileEntity? {
+        helper.readableDatabase.rawQuery("SELECT * FROM student_profiles WHERE isCurrent = 1 LIMIT 1", null).use { c ->
+            if (c.moveToFirst()) {
+                return StudentProfileEntity(
+                    id = c.getString(c.getColumnIndexOrThrow("id")),
+                    name = c.getString(c.getColumnIndexOrThrow("name")),
+                    grade = c.getString(c.getColumnIndexOrThrow("grade")),
+                    learningStyle = c.getString(c.getColumnIndexOrThrow("learningStyle")),
+                    strengths = c.getString(c.getColumnIndexOrThrow("strengths")),
+                    weaknesses = c.getString(c.getColumnIndexOrThrow("weaknesses")),
+                    isCurrent = true
+                )
+            }
+        }
+        return null
+    }
+
+    private fun queryMastery(studentId: String): List<ConceptMasteryEntity> {
+        val list = mutableListOf<ConceptMasteryEntity>()
+        helper.readableDatabase.rawQuery("SELECT * FROM concept_mastery WHERE studentId = ? ORDER BY masteryScore ASC", arrayOf(studentId)).use { c ->
+            while (c.moveToNext()) {
+                list.add(
+                    ConceptMasteryEntity(
+                        id = c.getLong(c.getColumnIndexOrThrow("id")),
+                        studentId = c.getString(c.getColumnIndexOrThrow("studentId")),
+                        subject = c.getString(c.getColumnIndexOrThrow("subject")),
+                        topic = c.getString(c.getColumnIndexOrThrow("topic")),
+                        concept = c.getString(c.getColumnIndexOrThrow("concept")),
+                        masteryScore = c.getInt(c.getColumnIndexOrThrow("masteryScore")),
+                        attempts = c.getInt(c.getColumnIndexOrThrow("attempts")),
+                        correctCount = c.getInt(c.getColumnIndexOrThrow("correctCount")),
+                        incorrectCount = c.getInt(c.getColumnIndexOrThrow("incorrectCount")),
+                        lastErrorType = c.getString(c.getColumnIndexOrThrow("lastErrorType")),
+                        activeMisconception = c.getString(c.getColumnIndexOrThrow("activeMisconception")),
+                        lastUpdated = c.getLong(c.getColumnIndexOrThrow("lastUpdated"))
+                    )
+                )
+            }
+        }
+        return list
+    }
+
+    private fun queryMisconceptions(studentId: String): List<MisconceptionLogEntity> {
+        val list = mutableListOf<MisconceptionLogEntity>()
+        helper.readableDatabase.rawQuery("SELECT * FROM misconception_logs WHERE studentId = ? AND isResolved = 0 ORDER BY timestamp DESC", arrayOf(studentId)).use { c ->
+            while (c.moveToNext()) {
+                list.add(
+                    MisconceptionLogEntity(
+                        id = c.getLong(c.getColumnIndexOrThrow("id")),
+                        studentId = c.getString(c.getColumnIndexOrThrow("studentId")),
+                        concept = c.getString(c.getColumnIndexOrThrow("concept")),
+                        mistakePattern = c.getString(c.getColumnIndexOrThrow("mistakePattern")),
+                        sampleAnswer = c.getString(c.getColumnIndexOrThrow("sampleAnswer")),
+                        timestamp = c.getLong(c.getColumnIndexOrThrow("timestamp")),
+                        isResolved = c.getInt(c.getColumnIndexOrThrow("isResolved")) == 1
+                    )
+                )
+            }
+        }
+        return list
+    }
+
+    private fun queryExamPlan(studentId: String): ExamPlanEntity? {
+        helper.readableDatabase.rawQuery("SELECT * FROM exam_plans WHERE studentId = ? LIMIT 1", arrayOf(studentId)).use { c ->
+            if (c.moveToFirst()) {
+                return ExamPlanEntity(
+                    id = c.getLong(c.getColumnIndexOrThrow("id")),
+                    studentId = c.getString(c.getColumnIndexOrThrow("studentId")),
+                    examName = c.getString(c.getColumnIndexOrThrow("examName")),
+                    daysRemaining = c.getInt(c.getColumnIndexOrThrow("daysRemaining")),
+                    dailyMinutes = c.getInt(c.getColumnIndexOrThrow("dailyMinutes")),
+                    targetScore = c.getInt(c.getColumnIndexOrThrow("targetScore")),
+                    currentDayPlan = c.getString(c.getColumnIndexOrThrow("currentDayPlan"))
+                )
+            }
+        }
+        return null
+    }
+}
+
 // ----------------------------------------------------
 // Database - same public shape as the old Room version:
 // AppDatabase.getDatabase(context).chatDao() / .focusSignalsDao() / .studyCaptureDao()
@@ -766,10 +1195,12 @@ class AppDatabase private constructor(context: Context) {
     private val _studyCaptureDao = StudyCaptureDao(helper)
     private val _focusSignalsDao = FocusSignalsDao(helper)
     private val _chatDao = ChatDao(helper)
+    private val _learningTwinDao = LearningTwinDao(helper)
 
     fun studyCaptureDao(): StudyCaptureDao = _studyCaptureDao
     fun focusSignalsDao(): FocusSignalsDao = _focusSignalsDao
     fun chatDao(): ChatDao = _chatDao
+    fun learningTwinDao(): LearningTwinDao = _learningTwinDao
 
     companion object {
         @Volatile

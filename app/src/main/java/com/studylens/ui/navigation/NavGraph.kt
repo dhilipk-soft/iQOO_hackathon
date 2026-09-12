@@ -36,10 +36,14 @@ import com.studylens.ui.quiz.QuizScreen
 import com.studylens.ui.revision.RevisionScreen
 import com.studylens.ui.settings.ModelPickerScreen
 import com.studylens.ui.settings.SettingsScreen
+import com.studylens.ui.twin.LearningTwinScreen
+import com.studylens.ui.planner.ExamPlannerScreen
 
 sealed class Screen(val route: String, val label: String) {
     object Home : Screen("home", "Home")
     object StudyChat : Screen("study_chat", "Home")
+    object LearningTwin : Screen("learning_twin", "Twin")
+    object ExamPlanner : Screen("exam_planner", "Planner")
     object Quiz : Screen("quiz", "Quiz")
     object QuizResult : Screen("quiz_result", "Quiz Result")
     object Revision : Screen("revision", "Revision")
@@ -81,6 +85,11 @@ fun NavGraph(
     val isOnline by actualViewModel.isOnline.collectAsState()
     val isMultimodalSupported by actualViewModel.isMultimodalSupported.collectAsState()
     val isSpeaking by actualViewModel.ttsManager.isSpeaking.collectAsState()
+
+    val activeStudentProfile by actualViewModel.activeStudentProfile.collectAsState()
+    val conceptMasteries by actualViewModel.conceptMasteryList.collectAsState()
+    val misconceptions by actualViewModel.misconceptionsList.collectAsState()
+    val examPlan by actualViewModel.activeExamPlan.collectAsState()
 
     val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
@@ -167,7 +176,71 @@ fun NavGraph(
                             )
                         )
 
-                        // 2. Focus Insights Tab
+                        // 2. Personal Learning Twin Tab
+                        val isTwinTab = currentRoute == Screen.LearningTwin.route
+                        NavigationBarItem(
+                            icon = {
+                                TwinBrainIcon(tint = if (isTwinTab) Color(0xFF4F46E5) else Color(0xFF94A3B8))
+                            },
+                            label = {
+                                Text(
+                                    text = "Twin",
+                                    fontSize = 12.sp,
+                                    fontWeight = if (isTwinTab) FontWeight.Bold else FontWeight.Medium
+                                )
+                            },
+                            selected = isTwinTab,
+                            onClick = {
+                                navController.navigate(Screen.LearningTwin.route) {
+                                    popUpTo(navController.graph.findStartDestination().id) {
+                                        saveState = true
+                                    }
+                                    launchSingleTop = true
+                                    restoreState = true
+                                }
+                            },
+                            colors = NavigationBarItemDefaults.colors(
+                                selectedIconColor = Color(0xFF4F46E5),
+                                selectedTextColor = Color(0xFF4F46E5),
+                                unselectedIconColor = Color(0xFF94A3B8),
+                                unselectedTextColor = Color(0xFF94A3B8),
+                                indicatorColor = Color(0xFFEEF2FF)
+                            )
+                        )
+
+                        // 3. Exam Planner Tab
+                        val isPlannerTab = currentRoute == Screen.ExamPlanner.route
+                        NavigationBarItem(
+                            icon = {
+                                PlannerCalendarIcon(tint = if (isPlannerTab) Color(0xFF4F46E5) else Color(0xFF94A3B8))
+                            },
+                            label = {
+                                Text(
+                                    text = "Plan",
+                                    fontSize = 12.sp,
+                                    fontWeight = if (isPlannerTab) FontWeight.Bold else FontWeight.Medium
+                                )
+                            },
+                            selected = isPlannerTab,
+                            onClick = {
+                                navController.navigate(Screen.ExamPlanner.route) {
+                                    popUpTo(navController.graph.findStartDestination().id) {
+                                        saveState = true
+                                    }
+                                    launchSingleTop = true
+                                    restoreState = true
+                                }
+                            },
+                            colors = NavigationBarItemDefaults.colors(
+                                selectedIconColor = Color(0xFF4F46E5),
+                                selectedTextColor = Color(0xFF4F46E5),
+                                unselectedIconColor = Color(0xFF94A3B8),
+                                unselectedTextColor = Color(0xFF94A3B8),
+                                indicatorColor = Color(0xFFEEF2FF)
+                            )
+                        )
+
+                        // 4. Focus Insights Tab
                         val isFocusTab = currentRoute == Screen.Focus.route
                         NavigationBarItem(
                             icon = {
@@ -421,6 +494,28 @@ fun NavGraph(
                     onBack = { navController.popBackStack() }
                 )
             }
+
+            // 9. Personal Learning Twin & Mastery Map Screen
+            composable(Screen.LearningTwin.route) {
+                LearningTwinScreen(
+                    activeProfile = activeStudentProfile,
+                    conceptMasteries = conceptMasteries,
+                    misconceptions = misconceptions,
+                    onSwitchProfile = { actualViewModel.switchStudentProfile(it) },
+                    onResetDemo = { actualViewModel.resetLearningTwinDemoData() },
+                    onStartSocraticChat = { navController.navigate(Screen.StudyChat.route) }
+                )
+            }
+
+            // 10. Exam-Aware Adaptive Study Planner Screen
+            composable(Screen.ExamPlanner.route) {
+                ExamPlannerScreen(
+                    activeProfile = activeStudentProfile,
+                    examPlan = examPlan,
+                    conceptMasteries = conceptMasteries,
+                    onLaunchStudySession = { navController.navigate(Screen.StudyChat.route) }
+                )
+            }
         }
     }
 
@@ -482,5 +577,48 @@ fun SettingsGearIcon(tint: Color) {
             val endY = cy + (r + 3.dp.toPx()) * sinA
             drawLine(tint, Offset(startX, startY), Offset(endX, endY), strokeWidth = 2.2.dp.toPx(), cap = StrokeCap.Round)
         }
+    }
+}
+
+@Composable
+fun TwinBrainIcon(tint: Color) {
+    Canvas(modifier = Modifier.size(22.dp)) {
+        val cx = size.width / 2f
+        val cy = size.height / 2f
+        val strokeW = 1.8.dp.toPx()
+        // Head circle
+        drawCircle(tint, radius = 4.dp.toPx(), center = Offset(cx, cy - 4.dp.toPx()), style = Stroke(width = strokeW))
+        // Shoulders arc
+        drawArc(
+            color = tint,
+            startAngle = 0f,
+            sweepAngle = -180f,
+            useCenter = false,
+            topLeft = Offset(cx - 7.dp.toPx(), cy + 1.dp.toPx()),
+            size = androidx.compose.ui.geometry.Size(14.dp.toPx(), 10.dp.toPx()),
+            style = Stroke(width = strokeW, cap = StrokeCap.Round)
+        )
+    }
+}
+
+@Composable
+fun PlannerCalendarIcon(tint: Color) {
+    Canvas(modifier = Modifier.size(22.dp)) {
+        val strokeW = 1.8.dp.toPx()
+        val w = 15.dp.toPx()
+        val h = 14.dp.toPx()
+        val x = (size.width - w) / 2f
+        val y = (size.height - h) / 2f + 1.dp.toPx()
+
+        drawRoundRect(
+            color = tint,
+            topLeft = Offset(x, y),
+            size = androidx.compose.ui.geometry.Size(w, h),
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(2.5.dp.toPx()),
+            style = Stroke(width = strokeW)
+        )
+        drawLine(tint, Offset(x, y + 4.dp.toPx()), Offset(x + w, y + 4.dp.toPx()), strokeWidth = strokeW)
+        drawLine(tint, Offset(x + 4.dp.toPx(), y - 2.dp.toPx()), Offset(x + 4.dp.toPx(), y + 1.dp.toPx()), strokeWidth = strokeW, cap = StrokeCap.Round)
+        drawLine(tint, Offset(x + w - 4.dp.toPx(), y - 2.dp.toPx()), Offset(x + w - 4.dp.toPx(), y + 1.dp.toPx()), strokeWidth = strokeW, cap = StrokeCap.Round)
     }
 }

@@ -77,9 +77,10 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
     // instance after the user switches models, not a second unrelated LlmEngine.
     val llmEngine = LlmEngine(application)
     private val retrievalClient = RetrievalClient()
-    private val explainPipeline = ExplainPipeline(llmEngine, retrievalClient)
-
     private val database = AppDatabase.getDatabase(application)
+    val learningTwinManager = com.studylens.ai.LearningTwinManager(database)
+    private val explainPipeline = ExplainPipeline(llmEngine, retrievalClient, learningTwinManager)
+
     private val chatDao = database.chatDao()
     val usageCollector = try {
         com.studylens.StudyLensApp.instance.usageCollector
@@ -177,6 +178,54 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _revisionList = MutableStateFlow<List<QuizQuestion>>(emptyList())
     val revisionList: StateFlow<List<QuizQuestion>> = _revisionList.asStateFlow()
+
+    // ----------------------------------------------------
+    // Personal Learning Twin & Socratic Mode State
+    // ----------------------------------------------------
+    val activeStudentProfile = learningTwinManager.activeProfileFlow
+    val conceptMasteryList = learningTwinManager.conceptMasteryFlow
+    val misconceptionsList = learningTwinManager.misconceptionsFlow
+    val activeExamPlan = learningTwinManager.activeExamPlanFlow
+
+    private val _isSocraticMode = MutableStateFlow(true)
+    val isSocraticMode: StateFlow<Boolean> = _isSocraticMode.asStateFlow()
+
+    private val _lastEvaluationResult = MutableStateFlow<com.studylens.ai.EvaluationResult?>(null)
+    val lastEvaluationResult: StateFlow<com.studylens.ai.EvaluationResult?> = _lastEvaluationResult.asStateFlow()
+
+    fun toggleSocraticMode(enabled: Boolean) {
+        _isSocraticMode.value = enabled
+        explainPipeline.socraticModeEnabled = enabled
+    }
+
+    fun switchStudentProfile(studentId: String) {
+        viewModelScope.launch {
+            learningTwinManager.switchStudentProfile(studentId)
+        }
+    }
+
+    fun resetLearningTwinDemoData() {
+        viewModelScope.launch {
+            learningTwinManager.resetDemoData()
+        }
+    }
+
+    fun getNextLearningAction(): com.studylens.ai.NextLearningAction {
+        return learningTwinManager.computeNextBestAction()
+    }
+
+    fun evaluateStudentAnswer(conceptName: String, answer: String) {
+        viewModelScope.launch {
+            val result = learningTwinManager.evaluateAnswer(conceptName, answer)
+            _lastEvaluationResult.value = result
+        }
+    }
+
+    fun updateExamPlan(daysRemaining: Int, dailyMinutes: Int, planBreakdown: String) {
+        viewModelScope.launch {
+            learningTwinManager.updateExamPlan(daysRemaining, dailyMinutes, planBreakdown)
+        }
+    }
 
     private val _focusInsight = MutableStateFlow<FocusInsight?>(null)
     val focusInsight: StateFlow<FocusInsight?> = _focusInsight.asStateFlow()
@@ -420,6 +469,10 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
                     append("Q: ${fu.question}\nA: ${fu.answer}\n")
                 }
             }
+
+            // Evaluate against the Personal Learning Twin to update concept mastery
+            val eval = learningTwinManager.evaluateAnswer("Resistance", question)
+            _lastEvaluationResult.value = eval
 
             val result = explainPipeline.answerFollowUp(capture, conversationContext, question, online)
 
