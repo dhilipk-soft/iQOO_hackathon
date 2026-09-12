@@ -17,7 +17,14 @@ data class DownloadableModel(
     val filename: String,
     val sizeBytes: Long,
     val downloadUrl: String,
-    val available: Boolean
+    val available: Boolean,
+    // Confirmed (not guessed) via real on-device errors that this file's format can't load
+    // in litertlm-android's Engine API at all - e.g. .task files failing with "Unable to
+    // open zip archive" or "TF_LITE_VISION_ENCODER not found". Distinct from `available`
+    // (which is about hosting/URLs): a model can be fully hosted and downloaded and STILL be
+    // knownIncompatible, in which case the picker must never offer to switch to it, even if
+    // the file is already sitting on disk from earlier testing.
+    val knownIncompatible: Boolean = false
 )
 
 object ModelCatalog {
@@ -40,7 +47,8 @@ object ModelCatalog {
                     filename = o.getString("filename"),
                     sizeBytes = o.getLong("sizeBytes"),
                     downloadUrl = url,
-                    available = !url.contains(PLACEHOLDER_MARKER, ignoreCase = true)
+                    available = !url.contains(PLACEHOLDER_MARKER, ignoreCase = true),
+                    knownIncompatible = o.optBoolean("knownIncompatible", false)
                 )
             }
         } catch (e: Exception) {

@@ -8,6 +8,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -19,10 +20,14 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.studylens.ai.DownloadableModel
 import com.studylens.ai.LlmEngine
 import com.studylens.ai.ModelCatalog
 import com.studylens.ai.ModelDownloadManager
 import com.studylens.ai.ModelDownloadState
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * In-app model picker - browse the bundled catalog (models.json), download an ungated
@@ -36,11 +41,58 @@ fun ModelPickerScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val downloadManager = remember { ModelDownloadManager(context) }
     val models = remember { ModelCatalog.loadModels(context) }
 
     var activeFilename by remember { mutableStateOf(ModelDownloadManager.getActiveModelFilename(context)) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    // Which model is currently being test-loaded after a switch - shows a spinner on that
+    // row's button and blocks other switches until it resolves (success = keep it, failure =
+    // roll back to whatever was active before, with the real reason shown).
+    var verifyingModelId by remember { mutableStateOf<String?>(null) }
+
+    fun switchToModel(model: DownloadableModel) {
+        val previousModel = models.find { it.filename == activeFilename }
+        errorMessage = null
+        verifyingModelId = model.id
+        downloadManager.setActiveModel(model)
+        llmEngine.invalidate()
+        activeFilename = model.filename
+        scope.launch {
+            // NonCancellable: rememberCoroutineScope() is tied to this screen's lifecycle,
+            // so navigating away mid-verification would otherwise cancel this job right when
+            // it matters most - setActiveModel() above already committed to SharedPreferences
+            // synchronously, so without this, leaving the screen before verification finishes
+            // permanently strands the model as "active" with no actual confirmation it loads,
+            // and no rollback ever runs. This guarantees the verify-then-commit-or-rollback
+            // sequence always finishes regardless of navigation.
+            withContext(NonCancellable) {
+                val failureReason = llmEngine.verifyActiveModelLoads()
+                if (failureReason != null) {
+                    // Roll back - this model doesn't actually work on this device/library
+                    // combo (e.g. an unsupported file format), so leaving it "active" would
+                    // just mean every future chat message silently fails.
+                    if (previousModel != null) {
+                        downloadManager.setActiveModel(previousModel)
+                    } else {
+                        downloadManager.clearActiveModel()
+                    }
+                    llmEngine.invalidate()
+                    activeFilename = ModelDownloadManager.getActiveModelFilename(context)
+                    errorMessage = "${model.displayName} couldn't be loaded on this device: $failureReason"
+                }
+                verifyingModelId = null
+            }
+        }
+    }
+
+    fun deleteModel(model: DownloadableModel) {
+        downloadManager.deleteDownloadedModel(model)
+        llmEngine.invalidate()
+        activeFilename = ModelDownloadManager.getActiveModelFilename(context)
+        errorMessage = null
+    }
 
     Column(
         modifier = modifier
@@ -94,20 +146,32 @@ fun ModelPickerScreen(
             items(models) { model ->
                 val downloadState by downloadManager.observeDownload(model.id)
                     .collectAsState(initial = ModelDownloadState.Idle)
-                val isDownloaded = downloadManager.isDownloaded(model) || downloadState is ModelDownloadState.Success
+                // The actual file on disk is the only source of truth - NOT downloadState,
+                // which is WorkManager's cached status keyed by model.id. If a catalog entry's
+                // filename/URL ever changes while its id stays the same (e.g. correcting a
+                // .task entry to the right .litertlm file), a stale "Success" from the OLD
+                // download under that id would otherwise make the picker claim the NEW file
+                // is downloaded when it was never actually fetched - which is exactly the bug
+                // that caused "Switch to this model" to be offered before a real download ever
+                // happened, always failing instantly with "Model file not found on disk."
+                val isDownloaded = downloadManager.isDownloaded(model)
                 // "Active" means the model is both the selected preference AND actually
                 // present on disk - a filename can be the default preference before anything
                 // is downloaded, which must not be shown as if the model is ready to chat with.
                 val isActive = activeFilename == model.filename && isDownloaded
+                val isVerifying = verifyingModelId == model.id
 
                 // Once WorkManager reports success, activate the model automatically -
                 // this also fires correctly if the user left the screen mid-download and
-                // comes back after it finished.
+                // comes back after it finished. Never for a knownIncompatible model (none of
+                // the current catalog entries can even be downloaded new right now, but this
+                // guards the auto-switch specifically, independent of the button below).
                 LaunchedEffect(downloadState) {
-                    if (downloadState is ModelDownloadState.Success && activeFilename != model.filename) {
-                        downloadManager.setActiveModel(model)
-                        llmEngine.invalidate()
-                        activeFilename = model.filename
+                    if (downloadState is ModelDownloadState.Success &&
+                        activeFilename != model.filename &&
+                        !model.knownIncompatible
+                    ) {
+                        switchToModel(model)
                     }
                 }
 
@@ -131,9 +195,11 @@ fun ModelPickerScreen(
                                 Text(model.description, fontSize = 12.sp, color = Color(0xFF64748B), lineHeight = 16.sp)
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text(
-                                    text = "${model.sizeBytes / (1024 * 1024)} MB" + if (isDownloaded) " • downloaded" else "",
+                                    text = "${model.sizeBytes / (1024 * 1024)} MB" +
+                                        (if (isDownloaded) " • downloaded" else "") +
+                                        (if (model.knownIncompatible) " • not compatible with this device" else ""),
                                     fontSize = 11.sp,
-                                    color = Color(0xFF94A3B8)
+                                    color = if (model.knownIncompatible) Color(0xFFB91C1C) else Color(0xFF94A3B8)
                                 )
                             }
                             if (isActive) {
@@ -144,6 +210,22 @@ fun ModelPickerScreen(
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Bold,
                                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    )
+                                }
+                            }
+                            // Delete frees up storage (these are multi-GB files) - disabled
+                            // while a switch to/from this model is being verified so the file
+                            // can't disappear out from under an in-flight load attempt.
+                            if (isDownloaded && !isVerifying) {
+                                IconButton(
+                                    onClick = { deleteModel(model) },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Delete,
+                                        contentDescription = "Delete downloaded model",
+                                        tint = Color(0xFF94A3B8),
+                                        modifier = Modifier.size(18.dp)
                                     )
                                 }
                             }
@@ -184,19 +266,19 @@ fun ModelPickerScreen(
                                 onClick = {
                                     errorMessage = null
                                     when {
-                                        isActive -> Unit // already active, nothing to do
-                                        isDownloaded -> {
-                                            downloadManager.setActiveModel(model)
-                                            llmEngine.invalidate()
-                                            activeFilename = model.filename
+                                        model.knownIncompatible -> {
+                                            errorMessage = "${model.displayName} can't run on this device - " +
+                                                "its file format isn't supported by this app's engine (see above)."
                                         }
+                                        isActive -> Unit // already active, nothing to do
+                                        isDownloaded -> switchToModel(model)
                                         !model.available -> {
                                             errorMessage = "${model.displayName} isn't hosted yet - check back soon."
                                         }
                                         else -> downloadManager.enqueueDownload(model)
                                     }
                                 },
-                                enabled = !isActive,
+                                enabled = !model.knownIncompatible && !isActive && !isVerifying,
                                 modifier = Modifier.fillMaxWidth().height(44.dp),
                                 shape = RoundedCornerShape(12.dp),
                                 colors = ButtonDefaults.buttonColors(
@@ -205,17 +287,26 @@ fun ModelPickerScreen(
                                     disabledContentColor = Color(0xFF4F46E5)
                                 )
                             ) {
-                                Text(
-                                    text = when {
-                                        isActive -> "Active"
-                                        isDownloaded -> "Switch to this model"
-                                        !model.available -> "Not available yet"
-                                        failed != null -> "Retry download"
-                                        else -> "Download"
-                                    },
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 13.sp
-                                )
+                                if (isVerifying) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(18.dp),
+                                        color = Color(0xFF4F46E5),
+                                        strokeWidth = 2.dp
+                                    )
+                                } else {
+                                    Text(
+                                        text = when {
+                                            model.knownIncompatible -> "Not compatible with this device"
+                                            isActive -> "Active"
+                                            isDownloaded -> "Switch to this model"
+                                            !model.available -> "Not available yet"
+                                            failed != null -> "Retry download"
+                                            else -> "Download"
+                                        },
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 13.sp
+                                    )
+                                }
                             }
                         }
                     }
