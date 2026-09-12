@@ -8,10 +8,17 @@
 
     <uses-feature android:name="android.hardware.camera" android:required="true" />
 
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
+    </queries>
+
     <application
         android:name=".StudyLensApp"
         android:allowBackup="true"
         android:label="StudyLens"
+        android:theme="@style/Theme.StudyLens"
         android:supportsRtl="true">
 
         <activity
