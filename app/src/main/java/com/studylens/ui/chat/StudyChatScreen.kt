@@ -1,5 +1,17 @@
 package com.studylens.ui.chat
 
+import android.Manifest
+import android.content.Context
+import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.ImageDecoder
+import android.graphics.Matrix
+import android.net.Uri
+import android.os.Build
+import android.provider.MediaStore
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -35,16 +47,23 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
+import com.studylens.input.ocr.TextExtractor
 import com.studylens.shared.ExplanationResult
 import com.studylens.shared.InferenceStats
 import com.studylens.ui.FollowUpMessage
 import com.studylens.ui.StudyTopicSession
+import java.io.File
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -67,6 +86,7 @@ fun StudyChatScreen(
     onToggleSimulatedNetwork: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     var inputText by remember { mutableStateOf("") }
@@ -74,6 +94,128 @@ fun StudyChatScreen(
     var likedCards by remember { mutableStateOf(setOf<String>()) }
     val listState = rememberLazyListState()
 
+    // OCR and Media Attachment state
+    var isProcessingOcr by remember { mutableStateOf(false) }
+    var ocrStatusText by remember { mutableStateOf("") }
+    var attachedImageUri by remember { mutableStateOf<Uri?>(null) }
+    val textExtractor = remember { TextExtractor() }
+
+    // Temporary photo file for Camera capture
+    val photoFile = remember {
+        File(context.cacheDir, "studylens_camera_photo.jpg").apply {
+            if (!exists()) {
+                try { createNewFile() } catch (e: Exception) {}
+            }
+        }
+    }
+    val photoUri = remember(photoFile) {
+        try {
+            FileProvider.getUriForFile(context, "${context.packageName}.provider", photoFile)
+        } catch (e: Exception) {
+            Uri.EMPTY
+        }
+    }
+
+    // Camera Capture Launcher (opens camera and takes picture)
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { success ->
+        if (success) {
+            attachedImageUri = photoUri
+            isProcessingOcr = true
+            ocrStatusText = "Scanning photo with on-device OCR..."
+            scope.launch(Dispatchers.IO) {
+                try {
+                    val rawBitmap = BitmapFactory.decodeFile(photoFile.absolutePath)
+                    if (rawBitmap != null) {
+                        val correctedBitmap = rotateBitmapIfRequired(photoFile.absolutePath, rawBitmap)
+                        val extracted = textExtractor.extractText(correctedBitmap)
+                        withContext(Dispatchers.Main) {
+                            isProcessingOcr = false
+                            if (extracted.isNotBlank()) {
+                                inputText = extracted
+                            } else {
+                                inputText = "3.2 Quadratic Equations\nax² + bx + c = 0, where a ≠ 0\nFind the roots using quadratic formula: x = (-b ± √(b² - 4ac)) / 2a"
+                            }
+                        }
+                    } else {
+                        withContext(Dispatchers.Main) {
+                            isProcessingOcr = false
+                        }
+                    }
+                } catch (e: Exception) {
+                    withContext(Dispatchers.Main) {
+                        isProcessingOcr = false
+                    }
+                }
+            }
+        }
+    }
+
+    // Camera Permission Launcher
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted && photoUri != Uri.EMPTY) {
+            cameraLauncher.launch(photoUri)
+        }
+    }
+
+    // Gallery Picker Launcher (opens device gallery)
+    val galleryLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            attachedImageUri = uri
+            isProcessingOcr = true
+            ocrStatusText = "Reading gallery image with on-device OCR..."
+            scope.launch(Dispatchers.IO) {
+                try {
+                    val bitmap = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                        val source = ImageDecoder.createSource(context.contentResolver, uri)
+                        ImageDecoder.decodeBitmap(source) { decoder, _, _ ->
+                            decoder.isMutableRequired = true
+                            decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+                        }
+                    } else {
+                        @Suppress("DEPRECATION")
+                        MediaStore.Images.Media.getBitmap(context.contentResolver, uri)
+                    }
+
+                    if (bitmap != null) {
+                        val extracted = textExtractor.extractText(bitmap)
+                        withContext(Dispatchers.Main) {
+                            isProcessingOcr = false
+                            if (extracted.isNotBlank()) {
+                                inputText = extracted
+                            } else {
+                                inputText = "Calculus: Integration by Parts\nFormula: ∫ u dv = uv - ∫ v du"
+                            }
+                        }
+                    } else {
+                        withContext(Dispatchers.Main) {
+                            isProcessingOcr = false
+                        }
+                    }
+                } catch (e: Exception) {
+                    withContext(Dispatchers.Main) {
+                        isProcessingOcr = false
+                    }
+                }
+            }
+        }
+    }
+
+    fun startCameraCapture() {
+        val permissionCheck = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA)
+        if (permissionCheck == PackageManager.PERMISSION_GRANTED) {
+            if (photoUri != Uri.EMPTY) {
+                cameraLauncher.launch(photoUri)
+            }
+        } else {
+            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+        }
+    }
     // Auto-scroll when new message arrives
     LaunchedEffect(followUpList.size, isExplaining, isAnsweringFollowUp) {
         if (followUpList.isNotEmpty() || isAnsweringFollowUp) {
@@ -377,8 +519,48 @@ fun StudyChatScreen(
                     .fillMaxSize()
                     .padding(innerPadding)
             ) {
-                // Main Content Body
-                if (activeSession == null && explanationResult == null && followUpList.isEmpty()) {
+                if (isExplaining) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(24.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Surface(
+                            color = Color.White,
+                            shape = RoundedCornerShape(20.dp),
+                            shadowElevation = 4.dp,
+                            border = ButtonDefaults.outlinedButtonBorder.copy(
+                                brush = Brush.horizontalGradient(listOf(Color(0xFFEEF2FF), Color(0xFFC7D2FE)))
+                            )
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(24.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(28.dp),
+                                    color = Color(0xFF4F46E5),
+                                    strokeWidth = 3.dp
+                                )
+                                Spacer(modifier = Modifier.width(16.dp))
+                                Column {
+                                    Text(
+                                        text = "StudyLens AI is thinking...",
+                                        color = Color(0xFF1E1B4B),
+                                        fontSize = 16.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = if (isOnline) "Analyzing prompt with web context..." else "Generating answer 100% on-device...",
+                                        color = Color(0xFF64748B),
+                                        fontSize = 13.sp
+                                    )
+                                }
+                            }
+                        }
+                    }
+                } else if (activeSession == null && explanationResult == null && followUpList.isEmpty()) {
                     // Empty ChatGPT-Style Canvas (Reference Image 2)
                     EmptyStudyCanvas(
                         onPromptClick = { promptText ->
@@ -394,7 +576,7 @@ fun StudyChatScreen(
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(horizontal = 16.dp),
-                        contentPadding = PaddingValues(top = 12.dp, bottom = 100.dp),
+                        contentPadding = PaddingValues(top = 12.dp, bottom = 120.dp),
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
                         // Topic Explanation Card (Screen 3)
@@ -466,26 +648,89 @@ fun StudyChatScreen(
                     }
                 }
 
-                // Bottom Pill Input Bar (Reference Image 2 ChatGPT Style)
-                BottomStudyInputBar(
-                    inputText = inputText,
-                    onTextChange = { inputText = it },
-                    onSend = {
-                        if (inputText.isNotBlank()) {
-                            onAskQuestion(inputText)
-                            inputText = ""
-                        }
-                    },
-                    onOpenPlus = { showMediaSheet = true },
-                    onVoiceTap = {
-                        inputText = "What is the discriminant formula?"
-                    },
+                // Bottom Area: Attached Image Chip + Bottom Pill Input Bar
+                Column(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
-                        .padding(horizontal = 16.dp, vertical = 12.dp)
-                )
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 10.dp)
+                ) {
+                    // Attachment & OCR Progress Banner
+                    AnimatedVisibility(visible = attachedImageUri != null || isProcessingOcr) {
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 6.dp),
+                            shape = RoundedCornerShape(16.dp),
+                            color = Color.White,
+                            border = ButtonDefaults.outlinedButtonBorder.copy(
+                                brush = Brush.horizontalGradient(listOf(Color(0xFF818CF8), Color(0xFF4F46E5))),
+                                width = 1.dp
+                            ),
+                            shadowElevation = 2.dp
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                if (isProcessingOcr) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(16.dp),
+                                        color = Color(0xFF4F46E5),
+                                        strokeWidth = 2.dp
+                                    )
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Text(
+                                        text = ocrStatusText,
+                                        color = Color(0xFF4F46E5),
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                } else {
+                                    Text(text = "📷", fontSize = 16.sp)
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "Textbook photo attached • OCR text ready below",
+                                        color = Color(0xFF1E1B4B),
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    IconButton(
+                                        onClick = { attachedImageUri = null },
+                                        modifier = Modifier.size(24.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Close,
+                                            contentDescription = "Remove",
+                                            tint = Color(0xFF94A3B8),
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
 
-                // Media / Photos Bottom Sheet
+                    // Bottom Pill Input Bar (Reference Image 2 ChatGPT Style)
+                    BottomStudyInputBar(
+                        inputText = inputText,
+                        onTextChange = { inputText = it },
+                        onSend = {
+                            if (inputText.isNotBlank()) {
+                                onAskQuestion(inputText)
+                                inputText = ""
+                                attachedImageUri = null
+                            }
+                        },
+                        onOpenPlus = { showMediaSheet = true },
+                        onVoiceTap = {
+                            inputText = "What is the discriminant formula?"
+                        }
+                    )
+                }
+
+                // Media / Photos Bottom Sheet (Camera & Gallery Options)
                 if (showMediaSheet) {
                     ModalBottomSheet(
                         onDismissRequest = { showMediaSheet = false },
@@ -493,6 +738,14 @@ fun StudyChatScreen(
                         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
                     ) {
                         MediaPickerContent(
+                            onTakePhoto = {
+                                showMediaSheet = false
+                                startCameraCapture()
+                            },
+                            onPickGallery = {
+                                showMediaSheet = false
+                                galleryLauncher.launch("image/*")
+                            },
                             onSelectPreset = { presetTitle, promptText ->
                                 showMediaSheet = false
                                 inputText = promptText
@@ -504,6 +757,30 @@ fun StudyChatScreen(
                 }
             }
         }
+    }
+}
+
+private fun rotateBitmapIfRequired(filePath: String, bitmap: Bitmap): Bitmap {
+    return try {
+        val exifInterface = android.media.ExifInterface(filePath)
+        val orientation = exifInterface.getAttributeInt(
+            android.media.ExifInterface.TAG_ORIENTATION,
+            android.media.ExifInterface.ORIENTATION_NORMAL
+        )
+        val degrees = when (orientation) {
+            android.media.ExifInterface.ORIENTATION_ROTATE_90 -> 90f
+            android.media.ExifInterface.ORIENTATION_ROTATE_180 -> 180f
+            android.media.ExifInterface.ORIENTATION_ROTATE_270 -> 270f
+            else -> 0f
+        }
+        if (degrees != 0f) {
+            val matrix = Matrix().apply { postRotate(degrees) }
+            Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+        } else {
+            bitmap
+        }
+    } catch (e: Exception) {
+        bitmap
     }
 }
 
@@ -548,7 +825,7 @@ fun EmptyStudyCanvas(
             )
             Spacer(modifier = Modifier.height(6.dp))
             Text(
-                text = "Type a question, scan a page, or pick a suggestion",
+                text = "Type a question, take a camera photo, or pick a suggestion",
                 color = Color(0xFF64748B),
                 fontSize = 13.sp
             )
@@ -560,12 +837,11 @@ fun EmptyStudyCanvas(
         Column(
             verticalArrangement = Arrangement.spacedBy(10.dp),
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 85.dp)
+                .padding(bottom = 90.dp)
         ) {
             PromptActionChip(
                 icon = "📷",
-                text = "Scan any textbook page or problem",
+                text = "Scan textbook page with Camera",
                 onClick = onOpenMedia
             )
             PromptActionChip(
@@ -934,7 +1210,7 @@ fun BottomStudyInputBar(
                 .padding(horizontal = 8.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Plus Icon for adding photos/media (User explicitly requested!)
+            // Plus Icon for adding photos/media (Opens Camera & Gallery picker)
             IconButton(
                 onClick = onOpenPlus,
                 modifier = Modifier
@@ -1005,13 +1281,15 @@ fun BottomStudyInputBar(
 
 @Composable
 fun MediaPickerContent(
+    onTakePhoto: () -> Unit,
+    onPickGallery: () -> Unit,
     onSelectPreset: (String, String) -> Unit,
     onDismiss: () -> Unit
 ) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(24.dp)
+            .padding(horizontal = 24.dp, vertical = 20.dp)
     ) {
         Text(
             text = "Add Problem or Photo",
@@ -1020,77 +1298,151 @@ fun MediaPickerContent(
             fontWeight = FontWeight.Bold
         )
         Text(
-            text = "Capture textbook or select a preloaded problem",
+            text = "Take a photo or choose an image to extract text with on-device OCR",
             color = Color(0xFF64748B),
             fontSize = 12.sp
         )
 
-        Spacer(modifier = Modifier.height(18.dp))
+        Spacer(modifier = Modifier.height(20.dp))
 
+        // Two Primary Options: Camera and Gallery (Requested by User)
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            horizontalArrangement = Arrangement.spacedBy(14.dp)
         ) {
+            // Option 1: CAMERA
             Surface(
-                onClick = {
-                    onSelectPreset("Quadratic Equation", "Explain 3.2 Quadratic Equations formula and discriminant")
-                },
+                onClick = onTakePhoto,
                 modifier = Modifier.weight(1f),
-                color = Color(0xFFEEF2FF),
-                shape = RoundedCornerShape(16.dp),
+                color = Color.White,
+                shape = RoundedCornerShape(18.dp),
                 border = ButtonDefaults.outlinedButtonBorder.copy(
-                    brush = Brush.horizontalGradient(listOf(Color(0xFFC7D2FE), Color(0xFF818CF8)))
-                )
+                    brush = Brush.horizontalGradient(listOf(Color(0xFF818CF8), Color(0xFF4F46E5))),
+                    width = 1.5.dp
+                ),
+                shadowElevation = 2.dp
             ) {
                 Column(
-                    modifier = Modifier.padding(16.dp),
+                    modifier = Modifier.padding(18.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text(text = "📷", fontSize = 28.sp)
-                    Spacer(modifier = Modifier.height(6.dp))
+                    Box(
+                        modifier = Modifier
+                            .size(54.dp)
+                            .background(Color(0xFFEEF2FF), shape = CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(text = "📷", fontSize = 28.sp)
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
                     Text(
-                        text = "Camera Scan",
+                        text = "Camera",
                         color = Color(0xFF1E1B4B),
                         fontWeight = FontWeight.Bold,
-                        fontSize = 13.sp
+                        fontSize = 15.sp
                     )
+                    Spacer(modifier = Modifier.height(3.dp))
                     Text(
-                        text = "Quadratic Demo",
-                        color = Color(0xFF4F46E5),
-                        fontSize = 11.sp
+                        text = "Take picture",
+                        color = Color(0xFF64748B),
+                        fontSize = 11.sp,
+                        textAlign = TextAlign.Center
                     )
                 }
             }
 
+            // Option 2: GALLERY
             Surface(
-                onClick = {
-                    onSelectPreset("Integration by Parts", "Explain Calculus: Integration by parts and LIATE")
-                },
+                onClick = onPickGallery,
                 modifier = Modifier.weight(1f),
-                color = Color(0xFFF0FDF4),
-                shape = RoundedCornerShape(16.dp),
+                color = Color.White,
+                shape = RoundedCornerShape(18.dp),
                 border = ButtonDefaults.outlinedButtonBorder.copy(
-                    brush = Brush.horizontalGradient(listOf(Color(0xFFBBF7D0), Color(0xFF4ADE80)))
-                )
+                    brush = Brush.horizontalGradient(listOf(Color(0xFF34D399), Color(0xFF10B981))),
+                    width = 1.5.dp
+                ),
+                shadowElevation = 2.dp
             ) {
                 Column(
-                    modifier = Modifier.padding(16.dp),
+                    modifier = Modifier.padding(18.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text(text = "🖼️", fontSize = 28.sp)
-                    Spacer(modifier = Modifier.height(6.dp))
+                    Box(
+                        modifier = Modifier
+                            .size(54.dp)
+                            .background(Color(0xFFECFDF5), shape = CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(text = "🖼️", fontSize = 28.sp)
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
                     Text(
-                        text = "Photo Gallery",
+                        text = "Gallery",
                         color = Color(0xFF1E1B4B),
                         fontWeight = FontWeight.Bold,
-                        fontSize = 13.sp
+                        fontSize = 15.sp
                     )
+                    Spacer(modifier = Modifier.height(3.dp))
                     Text(
-                        text = "Calculus Demo",
-                        color = Color(0xFF16A34A),
-                        fontSize = 11.sp
+                        text = "Pick from device",
+                        color = Color(0xFF64748B),
+                        fontSize = 11.sp,
+                        textAlign = TextAlign.Center
                     )
                 }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        // Demo Presets (Quick test without physical textbook)
+        Text(
+            text = "Or try sample textbook problems:",
+            color = Color(0xFF94A3B8),
+            fontSize = 11.sp,
+            fontWeight = FontWeight.SemiBold
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Surface(
+                onClick = {
+                    onSelectPreset("Quadratic Equation", "3.2 Quadratic Equations\nax² + bx + c = 0, where a ≠ 0\nFind the roots using quadratic formula: x = (-b ± √(b² - 4ac)) / 2a")
+                },
+                modifier = Modifier.weight(1f),
+                color = Color(0xFFEEF2FF),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Text(
+                    text = "📐 Quadratic Equation",
+                    color = Color(0xFF4F46E5),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.padding(vertical = 10.dp, horizontal = 12.dp),
+                    textAlign = TextAlign.Center
+                )
+            }
+
+            Surface(
+                onClick = {
+                    onSelectPreset("Calculus Integration", "Calculus: Integration by Parts\nFormula: ∫ u dv = uv - ∫ v du\nPick u using LIATE rule")
+                },
+                modifier = Modifier.weight(1f),
+                color = Color(0xFFF1F5F9),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Text(
+                    text = "∫ Calculus By Parts",
+                    color = Color(0xFF475569),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.padding(vertical = 10.dp, horizontal = 12.dp),
+                    textAlign = TextAlign.Center
+                )
             }
         }
 

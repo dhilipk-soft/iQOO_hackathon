@@ -4,6 +4,7 @@ import android.app.ActivityManager
 import android.content.Context
 import android.os.Build
 import android.os.PowerManager
+import android.util.Log
 import com.studylens.shared.InferenceStats
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -45,13 +46,16 @@ class DeviceVitalsMonitor(private val context: Context) {
 
     fun startMonitoring() {
         if (pollingJob?.isActive == true) return
+        Log.d(TAG, "Starting periodic device vitals monitoring loop (1500ms polling)...")
         pollingJob = scope.launch {
             while (isActive) {
+                val ram = getRamUsedMb()
+                val thermal = getThermalStatus()
                 _vitals.value = InferenceStats(
                     tokensPerSecond = lastTokensPerSecond,
                     latencyMs = lastLatencyMs,
-                    ramUsedMb = getRamUsedMb(),
-                    thermalStatus = getThermalStatus()
+                    ramUsedMb = ram,
+                    thermalStatus = thermal
                 )
                 delay(1500)
             }
@@ -59,6 +63,7 @@ class DeviceVitalsMonitor(private val context: Context) {
     }
 
     fun stopMonitoring() {
+        Log.d(TAG, "Stopping device vitals monitoring loop.")
         pollingJob?.cancel()
         pollingJob = null
     }
@@ -66,11 +71,14 @@ class DeviceVitalsMonitor(private val context: Context) {
     fun recordInference(tokensPerSecond: Double, latencyMs: Long) {
         lastTokensPerSecond = tokensPerSecond
         lastLatencyMs = latencyMs
+        val ram = getRamUsedMb()
+        val thermal = getThermalStatus()
+        Log.i(TAG, "Inference recorded: $tokensPerSecond tok/s, latency=${latencyMs}ms, RAM=${ram}MB, Thermal=$thermal")
         _vitals.value = _vitals.value.copy(
             tokensPerSecond = tokensPerSecond,
             latencyMs = latencyMs,
-            ramUsedMb = getRamUsedMb(),
-            thermalStatus = getThermalStatus()
+            ramUsedMb = ram,
+            thermalStatus = thermal
         )
     }
 
@@ -80,6 +88,7 @@ class DeviceVitalsMonitor(private val context: Context) {
             activityManager.getMemoryInfo(info)
             (info.totalMem - info.availMem) / (1024 * 1024)
         } catch (e: Exception) {
+            Log.e(TAG, "Error fetching memory info", e)
             0L
         }
     }
@@ -101,7 +110,13 @@ class DeviceVitalsMonitor(private val context: Context) {
                 "NORMAL"
             }
         } catch (e: Exception) {
+            Log.e(TAG, "Error fetching thermal status", e)
             "UNKNOWN"
         }
     }
+
+    companion object {
+        private const val TAG = "DeviceVitalsMonitor"
+    }
 }
+
