@@ -88,8 +88,10 @@ dependencies {
     implementation("androidx.room:room-ktx:2.6.1")
     implementation("androidx.work:work-runtime-ktx:2.9.0")
 
-    // On-device LLM via MediaPipe Tasks GenAI (compatible with Kotlin 2.0.21)
+    // On-device LLM via MediaPipe Tasks GenAI
     implementation("com.google.mediapipe:tasks-genai:0.10.24")
+    implementation("com.google.mediapipe:tasks-core:0.10.14")
+    implementation("com.google.mediapipe:tasks-vision:0.10.14")
 
     // Networking, for OpenRouter retrieval call
     implementation("com.squareup.retrofit2:retrofit:2.11.0")
