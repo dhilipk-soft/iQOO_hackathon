@@ -7,15 +7,22 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 /**
- * Wraps the on-device Gemma model via MediaPipe LLM Inference.
+ * Wraps the on-device Gemma model via MediaPipe LLM Inference. This is the guaranteed
+ * path — it must work with zero network connectivity, so any failure here falls back to
+ * a plain string rather than throwing (see implementation-plan.md §3a/§3b).
  */
 class LlmEngine(private val context: Context) {
 
-    private val modelFile = File(context.filesDir, "Gemma3-1B-IT_q4_ekv1280_sm8850.bin")
+    // Model file is pushed onto the device via adb into the app's own files dir:
+    //   adb push gemma3-1b-it-int4.task /data/local/tmp/
+    //   adb shell run-as com.studylens cp /data/local/tmp/gemma3-1b-it-int4.task /data/data/com.studylens/files/
+    private val modelFile = File(context.filesDir, "gemma3-1b-it-int4.task")
 
+    @Volatile
     private var llmInference: LlmInference? = null
 
-    var activeBackendName: String = "NPU/GPU"
+    /** Which backend actually loaded — read this for the Device Vitals strip (§3b). */
+    var activeBackendName: String = "none"
         private set
 
     private fun getOrCreateInference(): LlmInference {
@@ -25,9 +32,11 @@ class LlmEngine(private val context: Context) {
             val options = LlmInference.LlmInferenceOptions.builder()
                 .setModelPath(modelFile.absolutePath)
                 .setMaxTokens(512)
+                .setPreferredBackend(LlmInference.Backend.GPU) // explicit hardware acceleration
                 .build()
             val inference = LlmInference.createFromOptions(context, options)
             llmInference = inference
+            activeBackendName = "GPU"
             return inference
         }
     }
@@ -37,8 +46,7 @@ class LlmEngine(private val context: Context) {
             if (!modelFile.exists()) {
                 return@withContext "The on-device model isn't loaded on this device yet."
             }
-            val inference = getOrCreateInference()
-            inference.generateResponse(prompt)
+            getOrCreateInference().generateResponse(prompt)
         } catch (e: Exception) {
             "Sorry, I couldn't generate an explanation just now. Please try again."
         }
