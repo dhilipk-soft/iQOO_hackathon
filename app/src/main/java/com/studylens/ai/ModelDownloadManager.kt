@@ -18,15 +18,7 @@ sealed class ModelDownloadState {
 }
 
 /**
- * Downloads a model file straight from a public HTTPS URL into the app's private storage -
- * no Hugging Face token, no login flow. Only works for URLs that are genuinely public
- * (see models.json - Gemma's real Google repo is gated and would NOT work here until
- * re-hosted somewhere public).
- *
- * Downloads run via WorkManager (ModelDownloadWorker), not a plain coroutine - this is
- * what makes them survive navigating away from the picker screen, backgrounding the app,
- * or the screen turning off. A coroutine tied to the screen's own lifecycle gets cancelled
- * the moment you leave it, which is exactly the "resets to 0%" bug this replaces.
+ * Downloads a model file straight from a public HTTPS URL into the app's private storage.
  */
 class ModelDownloadManager(private val context: Context) {
 
@@ -40,8 +32,7 @@ class ModelDownloadManager(private val context: Context) {
         val request = OneTimeWorkRequestBuilder<ModelDownloadWorker>()
             .setInputData(data)
             .build()
-        // KEEP: tapping "Download" again while one's already running for this model just
-        // observes the existing job instead of starting a duplicate.
+
         WorkManager.getInstance(context).enqueueUniqueWork(
             ModelDownloadWorker.workName(model.id),
             ExistingWorkPolicy.KEEP,
@@ -49,8 +40,6 @@ class ModelDownloadManager(private val context: Context) {
         )
     }
 
-    /** Survives navigating away and back - backed by WorkManager's own persisted state,
-     * not any UI-scoped coroutine or remember{} block. */
     fun observeDownload(modelId: String): Flow<ModelDownloadState> {
         return WorkManager.getInstance(context)
             .getWorkInfosForUniqueWorkFlow(ModelDownloadWorker.workName(modelId))
@@ -79,13 +68,13 @@ class ModelDownloadManager(private val context: Context) {
         return File(context.filesDir, model.filename).exists()
     }
 
-    /** Marks this model as the one LlmEngine should load next. Call llmEngine.invalidate()
-     * right after this so the change actually takes effect on the next generateResponse(). */
+    /** Marks this model as the active model and persists whether it supports multimodal image inputs. */
     fun setActiveModel(model: DownloadableModel) {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .edit()
             .putString(KEY_ACTIVE_FILENAME, model.filename)
             .putString(KEY_ACTIVE_DISPLAY_NAME, model.displayName)
+            .putBoolean(KEY_ACTIVE_IS_MULTIMODAL, model.isMultimodal)
             .apply()
     }
 
@@ -93,9 +82,8 @@ class ModelDownloadManager(private val context: Context) {
         private const val PREFS_NAME = "studylens_model_prefs"
         private const val KEY_ACTIVE_FILENAME = "active_model_filename"
         private const val KEY_ACTIVE_DISPLAY_NAME = "active_model_display_name"
+        private const val KEY_ACTIVE_IS_MULTIMODAL = "active_model_is_multimodal"
 
-        // Qwen2-VL is the default: it's multimodal, ungated, and downloadable right now
-        // (Gemma needs the team's public re-host before it can be the default - see models.json).
         const val DEFAULT_MODEL_FILENAME = "Qwen2-VL-2B.litertlm"
         private const val DEFAULT_MODEL_DISPLAY_NAME = "Qwen2-VL 2B (multimodal, default)"
 
@@ -107,6 +95,11 @@ class ModelDownloadManager(private val context: Context) {
         fun getActiveModelDisplayName(context: Context): String {
             return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
                 .getString(KEY_ACTIVE_DISPLAY_NAME, DEFAULT_MODEL_DISPLAY_NAME) ?: DEFAULT_MODEL_DISPLAY_NAME
+        }
+
+        fun getActiveModelIsMultimodal(context: Context): Boolean {
+            return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(KEY_ACTIVE_IS_MULTIMODAL, true)
         }
     }
 }

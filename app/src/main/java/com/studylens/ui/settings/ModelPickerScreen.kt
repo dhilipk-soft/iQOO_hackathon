@@ -4,7 +4,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -26,13 +25,13 @@ import com.studylens.ai.ModelDownloadState
 
 /**
  * In-app model picker - browse the bundled catalog (models.json), download an ungated
- * model over plain HTTPS (no Hugging Face login), and switch LlmEngine to use it.
- * Gemma stays as the always-present default; this adds options, it doesn't replace it.
+ * model over plain HTTPS, and switch LlmEngine to use it.
  */
 @Composable
 fun ModelPickerScreen(
     llmEngine: LlmEngine,
     onBack: () -> Unit,
+    onModelActivated: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -64,7 +63,7 @@ fun ModelPickerScreen(
 
         Text(
             text = "All models run 100% on-device, zero network calls once downloaded. " +
-                "Bigger models may reason better but use more storage, RAM, and battery.",
+                "Multimodal models support image upload, while text-only models process text prompts.",
             color = Color(0xFF64748B),
             fontSize = 12.sp,
             lineHeight = 17.sp,
@@ -95,18 +94,13 @@ fun ModelPickerScreen(
                 val downloadState by downloadManager.observeDownload(model.id)
                     .collectAsState(initial = ModelDownloadState.Idle)
                 val isDownloaded = downloadManager.isDownloaded(model) || downloadState is ModelDownloadState.Success
-                // "Active" means the model is both the selected preference AND actually
-                // present on disk - a filename can be the default preference before anything
-                // is downloaded, which must not be shown as if the model is ready to chat with.
                 val isActive = activeFilename == model.filename && isDownloaded
 
-                // Once WorkManager reports success, activate the model automatically -
-                // this also fires correctly if the user left the screen mid-download and
-                // comes back after it finished.
                 LaunchedEffect(downloadState) {
                     if (downloadState is ModelDownloadState.Success && activeFilename != model.filename) {
                         downloadManager.setActiveModel(model)
                         llmEngine.invalidate()
+                        onModelActivated()
                         activeFilename = model.filename
                     }
                 }
@@ -184,10 +178,11 @@ fun ModelPickerScreen(
                                 onClick = {
                                     errorMessage = null
                                     when {
-                                        isActive -> Unit // already active, nothing to do
+                                        isActive -> Unit
                                         isDownloaded -> {
                                             downloadManager.setActiveModel(model)
                                             llmEngine.invalidate()
+                                            onModelActivated()
                                             activeFilename = model.filename
                                         }
                                         !model.available -> {
