@@ -27,6 +27,8 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.studylens.ui.StudyViewModel
 import com.studylens.ui.chat.StudyChatScreen
+import com.studylens.ui.focus.ContextRecapDialog
+import com.studylens.ui.focus.FocusGuardDialogHost
 import com.studylens.ui.focus.FocusScreen
 import com.studylens.ui.home.HomeScreen
 import com.studylens.ui.quiz.QuizResultScreen
@@ -69,9 +71,33 @@ fun NavGraph(
     val revisionList by actualViewModel.revisionList.collectAsState()
     val focusInsight by actualViewModel.focusInsight.collectAsState()
     val studySession by actualViewModel.studySession.collectAsState()
+    val focusSummary by actualViewModel.focusSummary.collectAsState()
+    val isFocusModeActive by actualViewModel.isFocusModeActive.collectAsState()
+    val isUsageGranted by actualViewModel.isUsageAccessGranted.collectAsState()
+    val isNotificationGranted by actualViewModel.isNotificationAccessGranted.collectAsState()
+    val focusGuardDialog by actualViewModel.focusGuardDialog.collectAsState()
+    val contextRecap by actualViewModel.contextRecap.collectAsState()
     val vitals by actualViewModel.vitals.collectAsState()
     val isOnline by actualViewModel.isOnline.collectAsState()
     val isSpeaking by actualViewModel.ttsManager.isSpeaking.collectAsState()
+
+    val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            when (event) {
+                androidx.lifecycle.Lifecycle.Event.ON_PAUSE -> actualViewModel.onAppPaused()
+                androidx.lifecycle.Lifecycle.Event.ON_RESUME -> {
+                    actualViewModel.refreshPermissions()
+                    actualViewModel.onAppResumed()
+                }
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
 
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
@@ -222,7 +248,11 @@ fun NavGraph(
                 HomeScreen(
                     onGetStarted = {
                         navController.navigate(Screen.StudyChat.route)
-                    }
+                    },
+                    isFocusModeActive = isFocusModeActive,
+                    onTriggerIntentToSwitch = { actualViewModel.triggerIntentToSwitch() },
+                    onTakeBreak = { actualViewModel.startPlannedBreak(60000L) },
+                    onEmergencyExit = { actualViewModel.triggerEmergencyExit() }
                 )
             }
 
@@ -277,7 +307,12 @@ fun NavGraph(
                             actualViewModel.startNewSession()
                             actualViewModel.explainCurrentCapture(customText = caption, image = bitmap)
                         }
-                    }
+                    },
+                    isFocusModeActive = isFocusModeActive,
+                    onToggleFocusMode = { actualViewModel.toggleFocusMode() },
+                    onTriggerIntentToSwitch = { actualViewModel.triggerIntentToSwitch() },
+                    onTakeBreak = { actualViewModel.startPlannedBreak(60000L) },
+                    onEmergencyExit = { actualViewModel.triggerEmergencyExit() }
                 )
             }
 
@@ -337,10 +372,33 @@ fun NavGraph(
             composable(Screen.Focus.route) {
                 LaunchedEffect(Unit) {
                     Log.d("NavGraph", "Navigated to Screen.Focus")
+                    actualViewModel.refreshPermissions()
+                    actualViewModel.loadRealFocusData()
                 }
                 FocusScreen(
                     session = studySession,
-                    focusInsight = focusInsight
+                    focusInsight = focusInsight,
+                    summary = focusSummary,
+                    isUsageGranted = isUsageGranted,
+                    isNotificationGranted = isNotificationGranted,
+                    isFocusModeActive = isFocusModeActive,
+                    onStartFocusSession = { actualViewModel.startFocusSession() },
+                    onEndFocusSession = { actualViewModel.endFocusSession() },
+                    onTriggerIntentToSwitch = { actualViewModel.triggerIntentToSwitch() },
+                    onTakeBreak = { actualViewModel.startPlannedBreak(60000L) },
+                    onEmergencyExit = { actualViewModel.triggerEmergencyExit() },
+                    onRefresh = { actualViewModel.loadRealFocusData() },
+                    onRequestUsagePermission = {
+                        try {
+                            context.startActivity(actualViewModel.usageCollector.getUsageAccessSettingsIntent())
+                        } catch (e: Exception) {}
+                    },
+                    onRequestNotificationPermission = {
+                        try {
+                            context.startActivity(actualViewModel.notificationCollector.getNotificationAccessSettingsIntent())
+                        } catch (e: Exception) {}
+                    },
+                    onSpeakText = { actualViewModel.speakText(it) }
                 )
             }
 
@@ -366,6 +424,24 @@ fun NavGraph(
             }
         }
     }
+
+    FocusGuardDialogHost(
+        dialogPhase = focusGuardDialog,
+        onSelectIntent = { actualViewModel.onSelectSwitchIntent(it) },
+        onAnswerCheck = { actualViewModel.answerFocusCheck(it) },
+        onStayReview = { actualViewModel.onStayAfterQuiz() },
+        onOverrideQuiz = { actualViewModel.onOverrideQuiz() },
+        onSelectBreakDuration = { actualViewModel.startPlannedBreak(it) },
+        onSelectResearchDuration = { actualViewModel.startPlannedResearch(it) },
+        onConfirmEmergencyExit = { actualViewModel.triggerEmergencyExit() },
+        onDismiss = { actualViewModel.dismissFocusGuardDialog() }
+    )
+
+    ContextRecapDialog(
+        recapInfo = contextRecap,
+        onRequestRecap = { actualViewModel.requestContextRecap() },
+        onDismiss = { actualViewModel.dismissContextRecap() }
+    )
 }
 
 @Composable

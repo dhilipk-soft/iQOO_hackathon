@@ -88,8 +88,17 @@ fun StudyChatScreen(
     onTakeQuiz: () -> Unit,
     onToggleSimulatedNetwork: () -> Unit,
     onExplainImage: (Bitmap, String) -> Unit = { _, _ -> },
+    isFocusModeActive: Boolean = false,
+    onToggleFocusMode: () -> Unit = {},
+    onTriggerIntentToSwitch: () -> Unit = {},
+    onTakeBreak: () -> Unit = {},
+    onEmergencyExit: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    BackHandler(enabled = isFocusModeActive) {
+        onTriggerIntentToSwitch()
+    }
+
     val context = LocalContext.current
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
@@ -460,57 +469,138 @@ fun StudyChatScreen(
                     color = Color(0xFFF8F9FE),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Row(
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .statusBarsPadding()
-                            .padding(horizontal = 16.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        // Left: Hamburger menu ☰
-                        IconButton(
-                            onClick = { scope.launch { drawerState.open() } },
+                        Row(
                             modifier = Modifier
-                                .size(40.dp)
-                                .background(Color.White, shape = CircleShape)
-                                .border(1.dp, Color(0xFFE2E8F0), CircleShape)
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            HamburgerIcon(tint = Color(0xFF1E1B4B))
+                            // Left: Hamburger menu ☰
+                            IconButton(
+                                onClick = { scope.launch { drawerState.open() } },
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .background(Color.White, shape = CircleShape)
+                                    .border(1.dp, Color(0xFFE2E8F0), CircleShape)
+                            ) {
+                                HamburgerIcon(tint = Color(0xFF1E1B4B))
+                            }
+
+                            // Center: Title
+                            Text(
+                                text = activeSession?.title ?: "StudyLens",
+                                color = Color(0xFF1E1B4B),
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1
+                            )
+
+                            // Right: Offline status badge (clickable to toggle simulation)
+                            Surface(
+                                onClick = onToggleSimulatedNetwork,
+                                shape = RoundedCornerShape(16.dp),
+                                color = if (isOnline) Color(0xFFEEF2FF) else Color(0xFFECFDF5),
+                                border = ButtonDefaults.outlinedButtonBorder.copy(
+                                    brush = Brush.horizontalGradient(
+                                        if (isOnline) listOf(Color(0xFF818CF8), Color(0xFF6366F1))
+                                        else listOf(Color(0xFF34D399), Color(0xFF10B981))
+                                    ),
+                                    width = 1.dp
+                                )
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = if (isOnline) "📡 Online" else "📴 Offline answer",
+                                        color = if (isOnline) Color(0xFF4F46E5) else Color(0xFF059669),
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
                         }
 
-                        // Center: Title
-                        Text(
-                            text = activeSession?.title ?: "StudyLens",
-                            color = Color(0xFF1E1B4B),
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1
-                        )
-
-                        // Right: Offline status badge (clickable to toggle simulation)
-                        Surface(
-                            onClick = onToggleSimulatedNetwork,
-                            shape = RoundedCornerShape(16.dp),
-                            color = if (isOnline) Color(0xFFEEF2FF) else Color(0xFFECFDF5),
-                            border = ButtonDefaults.outlinedButtonBorder.copy(
-                                brush = Brush.horizontalGradient(
-                                    if (isOnline) listOf(Color(0xFF818CF8), Color(0xFF6366F1))
-                                    else listOf(Color(0xFF34D399), Color(0xFF10B981))
-                                ),
-                                width = 1.dp
-                            )
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                        // Focus Guard Active / Inactive Status Bar during Study
+                        AnimatedVisibility(visible = isFocusModeActive) {
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 3.dp),
+                                shape = RoundedCornerShape(14.dp),
+                                color = Color(0xFF1E1B4B),
+                                shadowElevation = 3.dp
                             ) {
-                                Text(
-                                    text = if (isOnline) "📡 Online" else "📴 Offline answer",
-                                    color = if (isOnline) Color(0xFF4F46E5) else Color(0xFF059669),
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 12.dp, vertical = 7.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(8.dp)
+                                                .background(Color(0xFF22C55E), CircleShape)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = "🛡️ Focus Guard Active",
+                                            color = Color.White,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Surface(
+                                            onClick = onTriggerIntentToSwitch,
+                                            shape = RoundedCornerShape(8.dp),
+                                            color = Color(0xFF312E81)
+                                        ) {
+                                            Text(
+                                                "Switch 🧠",
+                                                fontSize = 10.sp,
+                                                color = Color(0xFFA5B4FC),
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                            )
+                                        }
+                                        Surface(
+                                            onClick = onTakeBreak,
+                                            shape = RoundedCornerShape(8.dp),
+                                            color = Color(0xFF312E81)
+                                        ) {
+                                            Text(
+                                                "Break ☕",
+                                                fontSize = 10.sp,
+                                                color = Color(0xFFA5B4FC),
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                            )
+                                        }
+                                        Surface(
+                                            onClick = onEmergencyExit,
+                                            shape = RoundedCornerShape(8.dp),
+                                            color = Color(0xFF450A0A)
+                                        ) {
+                                            Text(
+                                                "Exit 🚨",
+                                                fontSize = 10.sp,
+                                                color = Color(0xFFFCA5A5),
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         }
                     }

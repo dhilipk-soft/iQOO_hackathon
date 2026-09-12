@@ -15,6 +15,10 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 
@@ -68,6 +72,17 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+
+        <!-- Receiver for reliable exact break alarms, timer expiry, and ringing/vibration -->
+        <receiver
+            android:name=".input.focus.BreakAlarmReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.studylens.ACTION_BREAK_TIMER_EXPIRED" />
+                <action android:name="com.studylens.ACTION_RESEARCH_OVERDUE" />
+                <action android:name="com.studylens.ACTION_DISMISS_ALARM" />
+            </intent-filter>
+        </receiver>
     </application>
 
 </manifest>

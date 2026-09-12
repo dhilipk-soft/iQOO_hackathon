@@ -1,9 +1,11 @@
 package com.studylens.ui.home
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -42,6 +44,10 @@ enum class IconType {
 @Composable
 fun HomeScreen(
     onGetStarted: () -> Unit,
+    isFocusModeActive: Boolean = false,
+    onTriggerIntentToSwitch: () -> Unit = {},
+    onTakeBreak: () -> Unit = {},
+    onEmergencyExit: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val items = listOf(
@@ -75,6 +81,82 @@ fun HomeScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.SpaceBetween
         ) {
+            // Focus Guard Active Status Bar (visible during active study focus)
+            AnimatedVisibility(visible = isFocusModeActive) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 12.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    color = Color(0xFF1E1B4B),
+                    shadowElevation = 3.dp
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .background(Color(0xFF22C55E), CircleShape)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "🛡️ Focus Guard Active",
+                                color = Color.White,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Surface(
+                                onClick = onTriggerIntentToSwitch,
+                                shape = RoundedCornerShape(8.dp),
+                                color = Color(0xFF312E81)
+                            ) {
+                                Text(
+                                    "Switch 🧠",
+                                    fontSize = 10.sp,
+                                    color = Color(0xFFA5B4FC),
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
+                            Surface(
+                                onClick = onTakeBreak,
+                                shape = RoundedCornerShape(8.dp),
+                                color = Color(0xFF312E81)
+                            ) {
+                                Text(
+                                    "Break ☕",
+                                    fontSize = 10.sp,
+                                    color = Color(0xFFA5B4FC),
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
+                            Surface(
+                                onClick = onEmergencyExit,
+                                shape = RoundedCornerShape(8.dp),
+                                color = Color(0xFF450A0A)
+                            ) {
+                                Text(
+                                    "Exit 🚨",
+                                    fontSize = 10.sp,
+                                    color = Color(0xFFFCA5A5),
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
             // Upper Section: Logo + Title + Features
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
