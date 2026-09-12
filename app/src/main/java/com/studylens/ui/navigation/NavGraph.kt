@@ -3,6 +3,7 @@ package com.studylens.ui.navigation
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.*
+import com.studylens.StudyLensApp
 import androidx.compose.ui.Modifier
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -32,11 +33,16 @@ fun NavGraph() {
     var currentExplanation by remember { mutableStateOf<ExplanationResult?>(null) }
     var currentQuiz by remember { mutableStateOf<List<QuizQuestion>>(emptyList()) }
 
+    val vitalsState by runCatching { StudyLensApp.instance.deviceVitalsMonitor.vitals.collectAsState() }
+        .getOrElse { remember { mutableStateOf(InferenceStats(0.0, 0, 0, "NORMAL")) } }
+    val isOnlineState by runCatching { StudyLensApp.instance.networkHealthChecker.isOnline.collectAsState() }
+        .getOrElse { remember { mutableStateOf(true) } }
+
     Scaffold(
         topBar = {
             DeviceVitalsStrip(
-                stats = InferenceStats(tokensPerSecond = 24.5, latencyMs = 120, ramUsedMb = 320, thermalStatus = "NORMAL"),
-                isOnline = true
+                stats = vitalsState,
+                isOnline = isOnlineState
             )
         }
     ) { innerPadding ->
