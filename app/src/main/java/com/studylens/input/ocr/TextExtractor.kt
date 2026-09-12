@@ -51,4 +51,3 @@ class TextExtractor {
         private const val TAG = "TextExtractor"
     }
 }
-

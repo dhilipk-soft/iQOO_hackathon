@@ -89,4 +89,3 @@ class TtsManager(context: Context) : TextToSpeech.OnInitListener {
         private const val TAG = "TtsManager"
     }
 }
-

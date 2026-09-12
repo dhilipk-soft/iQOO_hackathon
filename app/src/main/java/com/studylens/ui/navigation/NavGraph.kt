@@ -212,7 +212,7 @@ fun NavGraph(
             startDestination = Screen.Home.route,
             modifier = Modifier.padding(innerPadding)
         ) {
-            // 1. Welcome / Home Screen
+            // 1. Welcome / Home Screen (Image 1 Screen 1)
             composable(Screen.Home.route) {
                 LaunchedEffect(Unit) {
                     Log.d("NavGraph", "Navigated to Screen.Home")
@@ -224,7 +224,7 @@ fun NavGraph(
                 )
             }
 
-            // 2. Study Chat Screen
+            // 2. ChatGPT-Style Study Chat Screen (Image 1 Screen 3 & 4 + Image 2)
             composable(Screen.StudyChat.route) {
                 LaunchedEffect(Unit) {
                     Log.d("NavGraph", "Navigated to Screen.StudyChat")
@@ -268,7 +268,7 @@ fun NavGraph(
                 )
             }
 
-            // 3. Quiz Screen
+            // 3. Quiz Screen (Image 1 Screen 5)
             composable(Screen.Quiz.route) {
                 LaunchedEffect(Unit) {
                     Log.d("NavGraph", "Navigated to Screen.Quiz")
@@ -286,7 +286,7 @@ fun NavGraph(
                 )
             }
 
-            // 4. Quiz Result Screen
+            // 4. Quiz Result Screen (Image 1 Screen 6)
             composable(Screen.QuizResult.route) {
                 LaunchedEffect(Unit) {
                     Log.d("NavGraph", "Navigated to Screen.QuizResult")
@@ -305,7 +305,7 @@ fun NavGraph(
                 )
             }
 
-            // 5. Revision List Screen
+            // 5. Revision List Screen (Image 1 Screen 7)
             composable(Screen.Revision.route) {
                 LaunchedEffect(Unit) {
                     Log.d("NavGraph", "Navigated to Screen.Revision")
@@ -320,7 +320,7 @@ fun NavGraph(
                 )
             }
 
-            // 6. Focus Insights Screen
+            // 6. Focus Insights Screen (Image 1 Screen 8)
             composable(Screen.Focus.route) {
                 LaunchedEffect(Unit) {
                     Log.d("NavGraph", "Navigated to Screen.Focus")
@@ -331,7 +331,7 @@ fun NavGraph(
                 )
             }
 
-            // 7. Settings Screen
+            // 7. Settings Screen (Image 1 Screen 9)
             composable(Screen.Settings.route) {
                 LaunchedEffect(Unit) {
                     Log.d("NavGraph", "Navigated to Screen.Settings")
