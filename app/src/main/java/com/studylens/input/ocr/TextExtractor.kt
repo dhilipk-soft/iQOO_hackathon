@@ -21,7 +21,7 @@ class TextExtractor {
                         val text = visionText.text.trim()
                         continuation.resume(text)
                     }
-                    .addOnFailureListener { exception ->
+                    .addOnFailureListener {
                         continuation.resume("")
                     }
             } catch (e: Exception) {
