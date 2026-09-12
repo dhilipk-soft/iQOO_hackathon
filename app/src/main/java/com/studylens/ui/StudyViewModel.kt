@@ -1,6 +1,7 @@
 package com.studylens.ui
 
 import android.app.Application
+import android.graphics.Bitmap
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.studylens.ai.ExplainPipeline
@@ -52,7 +53,9 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
     private val vitalsMonitor = DeviceVitalsMonitor(application)
     val ttsManager = TtsManager(application)
 
-    private val llmEngine = LlmEngine(application)
+    // Not private - the model picker screen needs to call invalidate() on this exact
+    // instance after the user switches models, not a second unrelated LlmEngine.
+    val llmEngine = LlmEngine(application)
     private val retrievalClient = RetrievalClient()
     private val explainPipeline = ExplainPipeline(llmEngine, retrievalClient)
 
@@ -216,8 +219,11 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
         _isOnline.value = !_isOnline.value
     }
 
-    fun explainCurrentCapture(customText: String? = null) {
-        val textToProcess = customText?.ifBlank { null } ?: _capturedText.value.ifBlank { "General Study Topic" }
+    // image != null means multimodal - the photo goes straight to the model, no OCR step.
+    // customText/capturedText can legitimately be blank in that case.
+    fun explainCurrentCapture(customText: String? = null, image: Bitmap? = null) {
+        val textToProcess = customText?.ifBlank { null }
+            ?: _capturedText.value.ifBlank { if (image != null) "" else "General Study Topic" }
         _capturedText.value = textToProcess
         _isExplaining.value = true
         _followUpList.value = emptyList()
@@ -227,8 +233,9 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
             val online = _isOnline.value
             val capture = StudyCapture(id = startTime, extractedText = textToProcess, timestamp = startTime)
 
-            // Real pipeline: on-device model always runs; retrieval only blends in if online (§3a).
-            val result = explainPipeline.explain(capture, online)
+            // Real pipeline: on-device model always runs (reads the image directly when
+            // provided); retrieval only blends in if online AND there's a text topic (§3a).
+            val result = explainPipeline.explain(capture, online, image)
 
             val latency = System.currentTimeMillis() - startTime
             val wordCount = result.finalExplanation.split("\\s+".toRegex()).size

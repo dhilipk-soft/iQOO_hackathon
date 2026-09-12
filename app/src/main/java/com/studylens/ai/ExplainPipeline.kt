@@ -1,5 +1,6 @@
 package com.studylens.ai
 
+import android.graphics.Bitmap
 import com.studylens.BuildConfig
 import com.studylens.shared.ExplanationResult
 import com.studylens.shared.QuizQuestion
@@ -16,9 +17,14 @@ class ExplainPipeline(
         return text + "\n\n📚 Sources:\n" + citations.joinToString("\n") { "• ${it.title}\n  ${it.url}" }
     }
 
-    // Step 1 (retrieve, only if online) -> Step 2 (combine) -> Step 3 (generate, always local)
-    override suspend fun explain(capture: StudyCapture, isOnline: Boolean): ExplanationResult {
-        val retrieval = if (isOnline) {
+    // Step 1 (retrieve, only if online AND there's a text topic to search for) ->
+    // Step 2 (combine) -> Step 3 (generate, always local - reads the image directly when
+    // one is provided, no OCR involved)
+    override suspend fun explain(capture: StudyCapture, isOnline: Boolean, image: Bitmap?): ExplanationResult {
+        // With no OCR step, an image-only capture has no text topic to search the web
+        // for - retrieval only makes sense when there's actual text (typed, or alongside
+        // the image).
+        val retrieval = if (isOnline && capture.extractedText.isNotBlank()) {
             retrievalClient.fetchOnlineContext(capture.extractedText, BuildConfig.OPENROUTER_API_KEY)
         } else {
             RetrievalResult("")
@@ -26,14 +32,20 @@ class ExplainPipeline(
 
         val prompt = buildString {
             append("You are a patient tutor explaining to a student with limited internet access. ")
+            if (image != null) {
+                append("Look at the attached image (a textbook page or handwritten problem) and ")
+                append("explain what it's teaching. ")
+            }
             append("Give a clear, detailed explanation - aim for 5-8 sentences (more if the topic genuinely ")
             append("needs it). Be thorough, don't pad with filler, but don't be overly brief either.\n\n")
-            append("Content: ${capture.extractedText}\n")
+            if (capture.extractedText.isNotBlank()) {
+                append("Content: ${capture.extractedText}\n")
+            }
             if (retrieval.factsText.isNotBlank()) {
                 append("\nAdditional current context you may use if relevant:\n${retrieval.factsText}\n")
             }
         }
-        val explanation = llmEngine.generateResponse(prompt) // always runs, on-device, this is the guarantee
+        val explanation = llmEngine.generateResponse(prompt, image) // always runs, on-device, this is the guarantee
 
         return ExplanationResult(
             captureId = capture.id,

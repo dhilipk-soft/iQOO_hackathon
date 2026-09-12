@@ -1,0 +1,112 @@
+package com.studylens.ai
+
+import android.content.Context
+import androidx.work.ExistingWorkPolicy
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkInfo
+import androidx.work.WorkManager
+import androidx.work.workDataOf
+import java.io.File
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
+
+sealed class ModelDownloadState {
+    object Idle : ModelDownloadState()
+    data class Downloading(val progressPct: Int) : ModelDownloadState()
+    object Success : ModelDownloadState()
+    data class Failed(val message: String) : ModelDownloadState()
+}
+
+/**
+ * Downloads a model file straight from a public HTTPS URL into the app's private storage -
+ * no Hugging Face token, no login flow. Only works for URLs that are genuinely public
+ * (see models.json - Gemma's real Google repo is gated and would NOT work here until
+ * re-hosted somewhere public).
+ *
+ * Downloads run via WorkManager (ModelDownloadWorker), not a plain coroutine - this is
+ * what makes them survive navigating away from the picker screen, backgrounding the app,
+ * or the screen turning off. A coroutine tied to the screen's own lifecycle gets cancelled
+ * the moment you leave it, which is exactly the "resets to 0%" bug this replaces.
+ */
+class ModelDownloadManager(private val context: Context) {
+
+    fun enqueueDownload(model: DownloadableModel) {
+        val data = workDataOf(
+            ModelDownloadWorker.KEY_DISPLAY_NAME to model.displayName,
+            ModelDownloadWorker.KEY_FILENAME to model.filename,
+            ModelDownloadWorker.KEY_URL to model.downloadUrl,
+            ModelDownloadWorker.KEY_SIZE to model.sizeBytes
+        )
+        val request = OneTimeWorkRequestBuilder<ModelDownloadWorker>()
+            .setInputData(data)
+            .build()
+        // KEEP: tapping "Download" again while one's already running for this model just
+        // observes the existing job instead of starting a duplicate.
+        WorkManager.getInstance(context).enqueueUniqueWork(
+            ModelDownloadWorker.workName(model.id),
+            ExistingWorkPolicy.KEEP,
+            request
+        )
+    }
+
+    /** Survives navigating away and back - backed by WorkManager's own persisted state,
+     * not any UI-scoped coroutine or remember{} block. */
+    fun observeDownload(modelId: String): Flow<ModelDownloadState> {
+        return WorkManager.getInstance(context)
+            .getWorkInfosForUniqueWorkFlow(ModelDownloadWorker.workName(modelId))
+            .map { infos ->
+                val info = infos.firstOrNull() ?: return@map ModelDownloadState.Idle
+                when (info.state) {
+                    WorkInfo.State.RUNNING, WorkInfo.State.ENQUEUED, WorkInfo.State.BLOCKED -> {
+                        val pct = info.progress.getInt(ModelDownloadWorker.KEY_PROGRESS, 0)
+                        ModelDownloadState.Downloading(pct)
+                    }
+                    WorkInfo.State.SUCCEEDED -> ModelDownloadState.Success
+                    WorkInfo.State.FAILED -> {
+                        val error = info.outputData.getString(ModelDownloadWorker.KEY_ERROR) ?: "Download failed"
+                        ModelDownloadState.Failed(error)
+                    }
+                    WorkInfo.State.CANCELLED -> ModelDownloadState.Idle
+                }
+            }
+    }
+
+    fun cancelDownload(model: DownloadableModel) {
+        WorkManager.getInstance(context).cancelUniqueWork(ModelDownloadWorker.workName(model.id))
+    }
+
+    fun isDownloaded(model: DownloadableModel): Boolean {
+        return File(context.filesDir, model.filename).exists()
+    }
+
+    /** Marks this model as the one LlmEngine should load next. Call llmEngine.invalidate()
+     * right after this so the change actually takes effect on the next generateResponse(). */
+    fun setActiveModel(model: DownloadableModel) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_ACTIVE_FILENAME, model.filename)
+            .putString(KEY_ACTIVE_DISPLAY_NAME, model.displayName)
+            .apply()
+    }
+
+    companion object {
+        private const val PREFS_NAME = "studylens_model_prefs"
+        private const val KEY_ACTIVE_FILENAME = "active_model_filename"
+        private const val KEY_ACTIVE_DISPLAY_NAME = "active_model_display_name"
+
+        // Qwen2-VL is the default: it's multimodal, ungated, and downloadable right now
+        // (Gemma needs the team's public re-host before it can be the default - see models.json).
+        const val DEFAULT_MODEL_FILENAME = "Qwen2-VL-2B.litertlm"
+        private const val DEFAULT_MODEL_DISPLAY_NAME = "Qwen2-VL 2B (multimodal, default)"
+
+        fun getActiveModelFilename(context: Context): String {
+            return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .getString(KEY_ACTIVE_FILENAME, DEFAULT_MODEL_FILENAME) ?: DEFAULT_MODEL_FILENAME
+        }
+
+        fun getActiveModelDisplayName(context: Context): String {
+            return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .getString(KEY_ACTIVE_DISPLAY_NAME, DEFAULT_MODEL_DISPLAY_NAME) ?: DEFAULT_MODEL_DISPLAY_NAME
+        }
+    }
+}

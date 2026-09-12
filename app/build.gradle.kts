@@ -1,11 +1,13 @@
 import java.io.FileInputStream
 import java.util.Properties
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
-    id("com.google.devtools.ksp")
+    // No kapt/KSP anymore - Room (the only thing that needed an annotation processor) was
+    // replaced with plain SQLite specifically to unblock Kotlin 2.4 for multimodal support.
 }
 
 val localProperties = Properties().apply {
@@ -19,7 +21,7 @@ android {
 
     defaultConfig {
         applicationId = "com.studylens"
-        minSdk = 31
+        minSdk = 31 // required by litertlm-android
         targetSdk = 34
         versionCode = 1
         versionName = "1.0"
@@ -48,9 +50,6 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions {
-        jvmTarget = "17"
-    }
     buildFeatures {
         compose = true
         buildConfig = true
@@ -59,6 +58,14 @@ android {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
+    }
+}
+
+// Replaces the deprecated android.kotlinOptions { jvmTarget = "17" } - required by
+// the Kotlin 2.4.20 Gradle plugin.
+kotlin {
+    compilerOptions {
+        jvmTarget = JvmTarget.fromTarget("17")
     }
 }
 
@@ -82,10 +89,8 @@ dependencies {
     implementation("androidx.camera:camera-view:1.3.4")
     implementation("com.google.mlkit:text-recognition:16.0.0")
 
-    // Local storage + background work
-    implementation("androidx.room:room-runtime:2.6.1")
-    ksp("androidx.room:room-compiler:2.6.1")
-    implementation("androidx.room:room-ktx:2.6.1")
+    // Local storage: plain SQLite now (input/data/AppDatabase.kt) - no Room, no annotation
+    // processor, so nothing here needs a Kotlin-metadata-compatible compiler plugin.
     implementation("androidx.work:work-runtime-ktx:2.9.0")
 
     // On-device LLM via MediaPipe Tasks GenAI

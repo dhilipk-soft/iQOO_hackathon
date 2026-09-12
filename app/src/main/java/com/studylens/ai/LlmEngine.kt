@@ -49,7 +49,13 @@ class LlmEngine(private val context: Context) {
         }
     }
 
-    suspend fun generateResponse(prompt: String, imageBitmap: Bitmap? = null): String = withContext(Dispatchers.IO) {
+    fun invalidate() {
+        engineManager.close()
+    }
+
+    suspend fun generateResponse(prompt: String): String = generateResponse(prompt, imageBitmap = null)
+
+    suspend fun generateResponse(prompt: String, imageBitmap: Bitmap?): String = withContext(Dispatchers.IO) {
         Log.d(TAG, "LlmEngine.generateResponse called with prompt length: ${prompt.length}")
         val startTime = System.currentTimeMillis()
 

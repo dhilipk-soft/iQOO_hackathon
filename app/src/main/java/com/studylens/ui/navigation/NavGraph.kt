@@ -32,6 +32,7 @@ import com.studylens.ui.home.HomeScreen
 import com.studylens.ui.quiz.QuizResultScreen
 import com.studylens.ui.quiz.QuizScreen
 import com.studylens.ui.revision.RevisionScreen
+import com.studylens.ui.settings.ModelPickerScreen
 import com.studylens.ui.settings.SettingsScreen
 
 sealed class Screen(val route: String, val label: String) {
@@ -42,6 +43,7 @@ sealed class Screen(val route: String, val label: String) {
     object Revision : Screen("revision", "Revision")
     object Focus : Screen("focus", "Focus")
     object Settings : Screen("settings", "Settings")
+    object ModelPicker : Screen("model_picker", "Choose Model")
 }
 
 @Composable
@@ -264,6 +266,17 @@ fun NavGraph(
                     },
                     onToggleSimulatedNetwork = {
                         actualViewModel.toggleSimulatedNetwork()
+                    },
+                    onExplainImage = { bitmap ->
+                        if (activeSession == null || explanationResult == null) {
+                            actualViewModel.explainCurrentCapture(image = bitmap)
+                        } else {
+                            // Mid-conversation photo - treat it as a new topic, same as
+                            // starting fresh, rather than trying to fold an image into a
+                            // text-only follow-up.
+                            actualViewModel.startNewSession()
+                            actualViewModel.explainCurrentCapture(image = bitmap)
+                        }
                     }
                 )
             }
@@ -336,7 +349,20 @@ fun NavGraph(
                 LaunchedEffect(Unit) {
                     Log.d("NavGraph", "Navigated to Screen.Settings")
                 }
-                SettingsScreen()
+                SettingsScreen(
+                    onNavigateToModelPicker = {
+                        navController.navigate(Screen.ModelPicker.route)
+                    }
+                )
+            }
+
+            // 8. Model Picker - download/switch the on-device LLM (no Hugging Face login,
+            // only ungated models are listed in models.json)
+            composable(Screen.ModelPicker.route) {
+                ModelPickerScreen(
+                    llmEngine = actualViewModel.llmEngine,
+                    onBack = { navController.popBackStack() }
+                )
             }
         }
     }

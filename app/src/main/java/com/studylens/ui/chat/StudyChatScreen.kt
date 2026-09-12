@@ -56,7 +56,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
-import com.studylens.input.ocr.TextExtractor
 import com.studylens.shared.ExplanationResult
 import com.studylens.shared.InferenceStats
 import com.studylens.ui.FollowUpMessage
@@ -85,6 +84,7 @@ fun StudyChatScreen(
     onStopSpeaking: () -> Unit,
     onTakeQuiz: () -> Unit,
     onToggleSimulatedNetwork: () -> Unit,
+    onExplainImage: (Bitmap) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -95,11 +95,10 @@ fun StudyChatScreen(
     var likedCards by remember { mutableStateOf(setOf<String>()) }
     val listState = rememberLazyListState()
 
-    // OCR and Media Attachment state
+    // Media attachment state - no OCR anymore, the model reads the photo directly
     var isProcessingOcr by remember { mutableStateOf(false) }
     var ocrStatusText by remember { mutableStateOf("") }
     var attachedImageUri by remember { mutableStateOf<Uri?>(null) }
-    val textExtractor = remember { TextExtractor() }
 
     // Temporary photo file for Camera capture
     val photoFile = remember {
@@ -124,21 +123,16 @@ fun StudyChatScreen(
         if (success) {
             attachedImageUri = photoUri
             isProcessingOcr = true
-            ocrStatusText = "Scanning photo with on-device OCR..."
+            ocrStatusText = "Analyzing photo with on-device AI..."
             scope.launch(Dispatchers.IO) {
                 try {
                     val rawBitmap = BitmapFactory.decodeFile(photoFile.absolutePath)
                     if (rawBitmap != null) {
                         val correctedBitmap = rotateBitmapIfRequired(photoFile.absolutePath, rawBitmap)
-                        val extracted = textExtractor.extractText(correctedBitmap)
                         withContext(Dispatchers.Main) {
                             isProcessingOcr = false
-                            // Send the extracted text straight to the AI - it's the prompt,
-                            // not something to dump into the visible chat box.
-                            val toSend = extracted.ifBlank {
-                                "3.2 Quadratic Equations\nax² + bx + c = 0, where a ≠ 0\nFind the roots using quadratic formula: x = (-b ± √(b² - 4ac)) / 2a"
-                            }
-                            onAskQuestion(toSend)
+                            // Photo goes straight to the multimodal model - no OCR step.
+                            onExplainImage(correctedBitmap)
                             attachedImageUri = null
                         }
                     } else {
@@ -171,7 +165,7 @@ fun StudyChatScreen(
         if (uri != null) {
             attachedImageUri = uri
             isProcessingOcr = true
-            ocrStatusText = "Reading gallery image with on-device OCR..."
+            ocrStatusText = "Analyzing gallery image with on-device AI..."
             scope.launch(Dispatchers.IO) {
                 try {
                     val bitmap = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
@@ -186,15 +180,10 @@ fun StudyChatScreen(
                     }
 
                     if (bitmap != null) {
-                        val extracted = textExtractor.extractText(bitmap)
                         withContext(Dispatchers.Main) {
                             isProcessingOcr = false
-                            // Send the extracted text straight to the AI - it's the prompt,
-                            // not something to dump into the visible chat box.
-                            val toSend = extracted.ifBlank {
-                                "Calculus: Integration by Parts\nFormula: ∫ u dv = uv - ∫ v du"
-                            }
-                            onAskQuestion(toSend)
+                            // Photo goes straight to the multimodal model - no OCR step.
+                            onExplainImage(bitmap)
                             attachedImageUri = null
                         }
                     } else {

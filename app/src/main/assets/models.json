@@ -1,0 +1,40 @@
+{
+  "models": [
+    {
+      "id": "qwen2-vl-2b",
+      "displayName": "Qwen2-VL 2B (multimodal)",
+      "description": "Alibaba's vision model - reads images directly, no login required. Recommended to test multimodal today.",
+      "filename": "Qwen2-VL-2B.litertlm",
+      "sizeBytes": 1783424544,
+      "downloadUrl": "https://huggingface.co/litert-community/Qwen2-VL-2B/resolve/main/Qwen2-VL-2B.litertlm",
+      "available": true
+    },
+    {
+      "id": "gemma-3n-e2b-it",
+      "displayName": "Gemma 3n E2B (multimodal)",
+      "description": "Google's on-device model - reads images directly. Gated (manual approval) - needs the team's public re-host.",
+      "filename": "gemma-3n-E2B-it-int4.task",
+      "sizeBytes": 3136926777,
+      "downloadUrl": "REPLACE_ME_WITH_TEAM_HOSTED_URL/gemma-3n-E2B-it-int4.task",
+      "available": false
+    },
+    {
+      "id": "gemma-3n-e4b-it",
+      "displayName": "Gemma 3n E4B (multimodal, larger)",
+      "description": "Stronger but heavier than E2B (~4.1GB). Gated (manual approval) - needs the team's public re-host.",
+      "filename": "gemma-3n-E4B-it-int4.task",
+      "sizeBytes": 4412513942,
+      "downloadUrl": "https://huggingface.co/13dhilip/model_gemma3-4b-it-int4-web/resolve/main/gemma3-4b-it-int4-web.task",
+      "available": false
+    },
+    {
+      "id": "qwen2.5-1.5b-instruct",
+      "displayName": "Qwen 2.5 1.5B Instruct (text-only)",
+      "description": "UNVERIFIED with the new engine - this .task file was tested against the old tasks-genai library, not litertlm-android. Confirm it loads before relying on it.",
+      "filename": "Qwen2.5-1.5B-Instruct_seq128_q8_ekv1280.task",
+      "sizeBytes": 1567364648,
+      "downloadUrl": "https://huggingface.co/litert-community/Qwen2.5-1.5B-Instruct/resolve/main/Qwen2.5-1.5B-Instruct_seq128_q8_ekv1280.task",
+      "available": true
+    }
+  ]
+}
