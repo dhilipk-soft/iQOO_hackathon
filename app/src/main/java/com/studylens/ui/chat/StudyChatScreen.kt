@@ -21,6 +21,10 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -1261,6 +1265,18 @@ fun BottomStudyInputBar(
                         fontSize = 15.sp
                     )
                 },
+                keyboardOptions = KeyboardOptions(
+                    capitalization = KeyboardCapitalization.Sentences,
+                    autoCorrect = false,
+                    imeAction = ImeAction.Send
+                ),
+                keyboardActions = KeyboardActions(
+                    onSend = {
+                        if (inputText.isNotBlank()) {
+                            onSend()
+                        }
+                    }
+                ),
                 colors = TextFieldDefaults.colors(
                     focusedContainerColor = Color.Transparent,
                     unfocusedContainerColor = Color.Transparent,

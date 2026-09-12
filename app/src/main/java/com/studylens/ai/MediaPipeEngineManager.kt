@@ -33,10 +33,10 @@ class MediaPipeEngineManager(private val context: Context) {
         try {
             _engineState.value = EngineState.LoadingIntoMemory
 
-            // 1. Initialize Base Engine
+            // 1. Initialize Base Engine (setMaxTokens bounded to 1280 KV-cache limit for ekv1280 model)
             val inferenceOptions = LlmInference.LlmInferenceOptions.builder()
                 .setModelPath(absolutePath)
-                .setMaxTokens(2048)
+                .setMaxTokens(1280)
                 .setPreferredBackend(LlmInference.Backend.GPU)
                 .build()
 
@@ -93,6 +93,46 @@ class MediaPipeEngineManager(private val context: Context) {
         } catch (e: Exception) {
             Log.e("MediaPipeEngineManager", "Generation Failed", e)
             _generationState.emit(GenerationState.Error(e.localizedMessage ?: "Inference crashed"))
+        }
+    }
+
+    /**
+     * Generates a summary of past conversation history.
+     * Bypasses multimodal images and uses pure text generation.
+     */
+    suspend fun summarizeTranscript(formattedTranscript: String) = withContext(Dispatchers.IO) {
+        if (session == null || _engineState.value !is EngineState.Ready) {
+            _generationState.emit(GenerationState.Error("Engine not ready for summarization."))
+            return@withContext
+        }
+
+        try {
+            _generationState.emit(GenerationState.Generating)
+            val activeSession = session!!
+
+            val summaryPrompt = """
+                Below is a conversation between a User and an AI Assistant.
+                Summarize the key points, decisions, and topics covered concisely.
+                
+                --- CONVERSATION ---
+                $formattedTranscript
+                --- END ---
+                
+                Summary:
+            """.trimIndent()
+
+            activeSession.addQueryChunk(summaryPrompt)
+
+            activeSession.generateResponseAsync { partialResult, done ->
+                if (done) {
+                    _generationState.tryEmit(GenerationState.Done(partialResult ?: ""))
+                } else {
+                    _generationState.tryEmit(GenerationState.Partial(partialResult ?: ""))
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("MediaPipeEngineManager", "Summarization failed", e)
+            _generationState.emit(GenerationState.Error(e.localizedMessage ?: "Summarization crashed"))
         }
     }
 

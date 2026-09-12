@@ -85,7 +85,7 @@ private fun String.toStringList(): List<String> = if (isBlank()) emptyList() els
 // SQLite schema
 // ----------------------------------------------------
 
-class DbHelper(context: Context) : SQLiteOpenHelper(context, "studylens_db", null, 1) {
+class DbHelper(context: Context) : SQLiteOpenHelper(context, "studylens_db", null, 2) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
             """CREATE TABLE study_captures (
@@ -153,6 +153,10 @@ class DbHelper(context: Context) : SQLiteOpenHelper(context, "studylens_db", nul
         db.execSQL("DROP TABLE IF EXISTS chat_sessions")
         db.execSQL("DROP TABLE IF EXISTS chat_messages")
         onCreate(db)
+    }
+
+    override fun onDowngrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        onUpgrade(db, oldVersion, newVersion)
     }
 }
 
