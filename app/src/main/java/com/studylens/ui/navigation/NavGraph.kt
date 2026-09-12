@@ -267,15 +267,15 @@ fun NavGraph(
                     onToggleSimulatedNetwork = {
                         actualViewModel.toggleSimulatedNetwork()
                     },
-                    onExplainImage = { bitmap ->
+                    onExplainImage = { bitmap, caption ->
                         if (activeSession == null || explanationResult == null) {
-                            actualViewModel.explainCurrentCapture(image = bitmap)
+                            actualViewModel.explainCurrentCapture(customText = caption, image = bitmap)
                         } else {
                             // Mid-conversation photo - treat it as a new topic, same as
                             // starting fresh, rather than trying to fold an image into a
                             // text-only follow-up.
                             actualViewModel.startNewSession()
-                            actualViewModel.explainCurrentCapture(image = bitmap)
+                            actualViewModel.explainCurrentCapture(customText = caption, image = bitmap)
                         }
                     }
                 )

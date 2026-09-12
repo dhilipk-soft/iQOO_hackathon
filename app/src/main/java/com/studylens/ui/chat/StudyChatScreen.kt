@@ -15,6 +15,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -47,7 +48,9 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -84,7 +87,7 @@ fun StudyChatScreen(
     onStopSpeaking: () -> Unit,
     onTakeQuiz: () -> Unit,
     onToggleSimulatedNetwork: () -> Unit,
-    onExplainImage: (Bitmap) -> Unit = {},
+    onExplainImage: (Bitmap, String) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -95,10 +98,12 @@ fun StudyChatScreen(
     var likedCards by remember { mutableStateOf(setOf<String>()) }
     val listState = rememberLazyListState()
 
-    // Media attachment state - no OCR anymore, the model reads the photo directly
+    // Media attachment state - no OCR anymore, the model reads the photo directly.
+    // The picked photo is staged here (not sent immediately) so the user can type a
+    // question about it first, same as attaching a file in any chat app.
     var isProcessingOcr by remember { mutableStateOf(false) }
     var ocrStatusText by remember { mutableStateOf("") }
-    var attachedImageUri by remember { mutableStateOf<Uri?>(null) }
+    var stagedImage by remember { mutableStateOf<Bitmap?>(null) }
 
     // Temporary photo file for Camera capture
     val photoFile = remember {
@@ -121,9 +126,8 @@ fun StudyChatScreen(
         contract = ActivityResultContracts.TakePicture()
     ) { success ->
         if (success) {
-            attachedImageUri = photoUri
             isProcessingOcr = true
-            ocrStatusText = "Analyzing photo with on-device AI..."
+            ocrStatusText = "Preparing photo..."
             scope.launch(Dispatchers.IO) {
                 try {
                     val rawBitmap = BitmapFactory.decodeFile(photoFile.absolutePath)
@@ -131,9 +135,8 @@ fun StudyChatScreen(
                         val correctedBitmap = rotateBitmapIfRequired(photoFile.absolutePath, rawBitmap)
                         withContext(Dispatchers.Main) {
                             isProcessingOcr = false
-                            // Photo goes straight to the multimodal model - no OCR step.
-                            onExplainImage(correctedBitmap)
-                            attachedImageUri = null
+                            // Stage it - the user types a question next, then hits send.
+                            stagedImage = correctedBitmap
                         }
                     } else {
                         withContext(Dispatchers.Main) {
@@ -163,9 +166,8 @@ fun StudyChatScreen(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         if (uri != null) {
-            attachedImageUri = uri
             isProcessingOcr = true
-            ocrStatusText = "Analyzing gallery image with on-device AI..."
+            ocrStatusText = "Preparing image..."
             scope.launch(Dispatchers.IO) {
                 try {
                     val bitmap = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
@@ -182,9 +184,8 @@ fun StudyChatScreen(
                     if (bitmap != null) {
                         withContext(Dispatchers.Main) {
                             isProcessingOcr = false
-                            // Photo goes straight to the multimodal model - no OCR step.
-                            onExplainImage(bitmap)
-                            attachedImageUri = null
+                            // Stage it - the user types a question next, then hits send.
+                            stagedImage = bitmap
                         }
                     } else {
                         withContext(Dispatchers.Main) {
@@ -212,6 +213,8 @@ fun StudyChatScreen(
     }
     // Back from an active chat returns to the empty home canvas, rather than leaving the screen.
     BackHandler(enabled = activeSession != null) {
+        stagedImage = null
+        inputText = ""
         onStartNewSession()
     }
 
@@ -276,6 +279,8 @@ fun StudyChatScreen(
                     // "New Study Session" Action
                     Button(
                         onClick = {
+                            stagedImage = null
+                            inputText = ""
                             onStartNewSession()
                             scope.launch { drawerState.close() }
                         },
@@ -655,8 +660,8 @@ fun StudyChatScreen(
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 10.dp)
                 ) {
-                    // Attachment & OCR Progress Banner
-                    AnimatedVisibility(visible = attachedImageUri != null || isProcessingOcr) {
+                    // Attachment & Photo Preview Banner
+                    AnimatedVisibility(visible = stagedImage != null || isProcessingOcr) {
                         Surface(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -670,12 +675,12 @@ fun StudyChatScreen(
                             shadowElevation = 2.dp
                         ) {
                             Row(
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 if (isProcessingOcr) {
                                     CircularProgressIndicator(
-                                        modifier = Modifier.size(16.dp),
+                                        modifier = Modifier.size(16.dp).padding(start = 4.dp),
                                         color = Color(0xFF4F46E5),
                                         strokeWidth = 2.dp
                                     )
@@ -687,17 +692,26 @@ fun StudyChatScreen(
                                         fontWeight = FontWeight.Medium
                                     )
                                 } else {
-                                    Text(text = "📷", fontSize = 16.sp)
-                                    Spacer(modifier = Modifier.width(8.dp))
+                                    stagedImage?.let { bmp ->
+                                        Image(
+                                            bitmap = bmp.asImageBitmap(),
+                                            contentDescription = "Attached photo",
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier
+                                                .size(40.dp)
+                                                .clip(RoundedCornerShape(8.dp))
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(10.dp))
                                     Text(
-                                        text = "Textbook photo attached • OCR text ready below",
+                                        text = "Photo attached • type a question below, or just send",
                                         color = Color(0xFF1E1B4B),
                                         fontSize = 12.sp,
                                         fontWeight = FontWeight.SemiBold,
                                         modifier = Modifier.weight(1f)
                                     )
                                     IconButton(
-                                        onClick = { attachedImageUri = null },
+                                        onClick = { stagedImage = null },
                                         modifier = Modifier.size(24.dp)
                                     ) {
                                         Icon(
@@ -717,10 +731,14 @@ fun StudyChatScreen(
                         inputText = inputText,
                         onTextChange = { inputText = it },
                         onSend = {
-                            if (inputText.isNotBlank()) {
+                            val photo = stagedImage
+                            if (photo != null) {
+                                onExplainImage(photo, inputText.trim())
+                                stagedImage = null
+                                inputText = ""
+                            } else if (inputText.isNotBlank()) {
                                 onAskQuestion(inputText)
                                 inputText = ""
-                                attachedImageUri = null
                             }
                         },
                         onOpenPlus = { showMediaSheet = true },
