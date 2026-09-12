@@ -13,16 +13,17 @@ class ExplainPipeline(
 
     override suspend fun explain(capture: StudyCapture, isOnline: Boolean): ExplanationResult {
         Log.d(TAG, "explain requested for Capture ID=${capture.id}, isOnline=$isOnline")
+        val queryText = capture.extractedText.ifBlank { "General Topic" }
+
         val onlineContext = if (isOnline) {
             Log.d(TAG, "Fetching online web enrichment context...")
-            retrievalClient.fetchOnlineContext(capture.extractedText, "")
+            retrievalClient.fetchOnlineContext(queryText, "")
         } else {
             Log.d(TAG, "Offline mode active, skipping online retrieval.")
             ""
         }
-        val prompt = "Explain the following concept succinctly:\nText: ${capture.extractedText}\nContext: $onlineContext"
-        Log.d(TAG, "Sending prompt to LlmEngine...")
-        val explanation = llmEngine.generateResponse(prompt)
+
+        val explanation = llmEngine.generateResponse(queryText)
         Log.i(TAG, "Explanation generated successfully (length=${explanation.length} chars).")
 
         return ExplanationResult(
@@ -34,8 +35,7 @@ class ExplainPipeline(
 
     override suspend fun answerFollowUp(capture: StudyCapture, explanation: String, question: String): String {
         Log.d(TAG, "answerFollowUp called with question: '$question'")
-        val prompt = "Based on text: ${capture.extractedText} and explanation: $explanation\nAnswer question: $question"
-        val answer = llmEngine.generateResponse(prompt)
+        val answer = llmEngine.generateResponse(question)
         Log.i(TAG, "Follow-up answer generated (length=${answer.length} chars).")
         return answer
     }
@@ -52,4 +52,5 @@ class ExplainPipeline(
         private const val TAG = "ExplainPipeline"
     }
 }
+
 

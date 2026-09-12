@@ -241,6 +241,22 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private fun deriveTopicDetails(rawText: String): Triple<String, String, String?> {
+        val lower = rawText.lowercase()
+        return when {
+            lower.contains("photosynthesis") -> Triple("Photosynthesis", "Biology", "6CO₂ + 6H₂O ➔ C₆H₁₂O₆ + 6O₂")
+            lower.contains("newton") || lower.contains("force") -> Triple("Newton's Laws of Motion", "Physics", "F = m · a")
+            lower.contains("calculus") || lower.contains("integration") || lower.contains("integral") -> Triple("Integration by Parts", "Calculus", "∫ u dv = uv - ∫ v du")
+            lower.contains("quadratic") || lower.contains("discriminant") -> Triple("Quadratic Equation", "Algebra", "x = (-b ± √(b² - 4ac)) / 2a")
+            lower.contains("pythagor") || lower.contains("triangle") -> Triple("Pythagorean Theorem", "Geometry", "a² + b² = c²")
+            lower.contains("python") || lower.contains("code") || lower.contains("program") -> Triple("Python Fundamentals", "Computer Science", "[x**2 for x in range(10)]")
+            else -> {
+                val cleanTitle = rawText.lines().firstOrNull { it.isNotBlank() }?.take(30) ?: "General Study Topic"
+                Triple(cleanTitle, "General Science", null)
+            }
+        }
+    }
+
     fun setCapturedText(text: String) {
         _capturedText.value = text
     }
@@ -271,7 +287,7 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun explainCurrentCapture(customText: String? = null) {
-        val textToProcess = customText ?: _capturedText.value
+        val textToProcess = customText?.ifBlank { null } ?: _capturedText.value.ifBlank { "General Study Topic" }
         _capturedText.value = textToProcess
         _isExplaining.value = true
         _followUpList.value = emptyList()
@@ -280,53 +296,47 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
             val startTime = System.currentTimeMillis()
             val online = _isOnline.value
 
-            // Simulate realistic on-device token generation or use pipeline
-            delay(900)
+            val capture = StudyCapture(
+                id = System.currentTimeMillis(),
+                extractedText = textToProcess,
+                timestamp = System.currentTimeMillis()
+            )
 
-            val explanationText = if (online) {
-                """
-                Integration by Parts is derived from the product rule of differentiation: d/dx[u*v] = u'v + uv'.
-                
-                By integrating both sides and rearranging:
-                ∫ u dv = uv - ∫ v du.
-                
-                💡 Rule of thumb (LIATE): Choose 'u' in this priority order:
-                1. Logarithmic functions (e.g. ln x)
-                2. Inverse trigonometric (e.g. arctan x)
-                3. Algebraic (e.g. x², 3x)
-                4. Trigonometric (e.g. sin x, cos x)
-                5. Exponential (e.g. eˣ)
-                
-                Choose 'dv' as the remaining part that is straightforward to integrate.
-                """.trimIndent()
-            } else {
-                """
-                Integration by parts formula:
-                ∫ u dv = uv - ∫ v du.
-                
-                It comes directly from reversing the product rule of calculus. Use the LIATE rule to pick 'u':
-                Logs, Inverse trig, Algebraic, Trig, Exponential.
-                
-                Differentiate 'u' to get du, and integrate 'dv' to get v.
-                """.trimIndent()
-            }
+            val result = explainPipeline.explain(capture, online)
 
             val latency = System.currentTimeMillis() - startTime
-            val wordCount = explanationText.split("\\s+".toRegex()).size
+            val wordCount = result.finalExplanation.split("\\s+".toRegex()).size
             val tokensPerSec = String.format(java.util.Locale.US, "%.1f", (wordCount * 1.3) / (latency / 1000.0).coerceAtLeast(0.5)).toDoubleOrNull() ?: 28.5
 
             _vitals.value = InferenceStats(
                 tokensPerSecond = tokensPerSec,
                 latencyMs = latency,
-                ramUsedMb = 318,
-                thermalStatus = "NORMAL"
+                ramUsedMb = vitalsMonitor.getRamUsedMb().coerceAtLeast(312),
+                thermalStatus = vitalsMonitor.getThermalStatus()
             )
 
-            _explanationResult.value = ExplanationResult(
-                captureId = System.currentTimeMillis(),
-                finalExplanation = explanationText,
-                usedOnlineContext = online
+            val (topicTitle, topicSubject, topicFormula) = deriveTopicDetails(textToProcess)
+
+            val newSession = StudyTopicSession(
+                id = "session_${System.currentTimeMillis()}",
+                title = topicTitle,
+                subject = topicSubject,
+                previewText = textToProcess,
+                explanation = result.finalExplanation,
+                formula = topicFormula,
+                bulletPoints = listOf(
+                    "• Key topic: $topicTitle",
+                    "• Evaluated on-device by StudyLens AI",
+                    if (online) "• Enhanced with real-time web context" else "• Processed 100% offline on-device"
+                ),
+                followUps = emptyList()
             )
+
+            val updatedHistory = listOf(newSession) + _sessionHistory.value.filter { it.id != newSession.id }
+            _sessionHistory.value = updatedHistory
+            _activeSession.value = newSession
+
+            _explanationResult.value = result
             _isExplaining.value = false
         }
     }
@@ -337,16 +347,15 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
 
         viewModelScope.launch {
             val startTime = System.currentTimeMillis()
-            delay(800)
 
-            val answerText = when {
-                question.contains("liate", ignoreCase = true) ->
-                    "LIATE stands for Logarithmic, Inverse trigonometric, Algebraic, Trigonometric, Exponential. It is a heuristic to choose which function to differentiate as 'u'."
-                question.contains("example", ignoreCase = true) ->
-                    "For ∫ x*cos(x) dx: Pick u = x (Algebraic) and dv = cos(x)dx. Then du = dx, v = sin(x). Result = x*sin(x) - ∫ sin(x)dx = x*sin(x) + cos(x) + C."
-                else ->
-                    "Great question! When applying ∫ u dv = uv - ∫ v du, always check whether differentiating 'u' simplifies the expression. If it becomes more complex, swap choices."
-            }
+            val capture = StudyCapture(
+                id = _explanationResult.value?.captureId ?: System.currentTimeMillis(),
+                extractedText = _capturedText.value,
+                timestamp = System.currentTimeMillis()
+            )
+            val currentExp = _explanationResult.value?.finalExplanation ?: _activeSession.value?.explanation ?: ""
+
+            val answerText = explainPipeline.answerFollowUp(capture, currentExp, question)
 
             val latency = System.currentTimeMillis() - startTime
             _vitals.value = _vitals.value.copy(

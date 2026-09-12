@@ -378,7 +378,48 @@ fun StudyChatScreen(
                     .padding(innerPadding)
             ) {
                 // Main Content Body
-                if (activeSession == null && explanationResult == null && followUpList.isEmpty()) {
+                if (isExplaining) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(24.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Surface(
+                            color = Color.White,
+                            shape = RoundedCornerShape(20.dp),
+                            shadowElevation = 4.dp,
+                            border = ButtonDefaults.outlinedButtonBorder.copy(
+                                brush = Brush.horizontalGradient(listOf(Color(0xFFEEF2FF), Color(0xFFC7D2FE)))
+                            )
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(24.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(28.dp),
+                                    color = Color(0xFF4F46E5),
+                                    strokeWidth = 3.dp
+                                )
+                                Spacer(modifier = Modifier.width(16.dp))
+                                Column {
+                                    Text(
+                                        text = "StudyLens AI is thinking...",
+                                        color = Color(0xFF1E1B4B),
+                                        fontSize = 16.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = if (isOnline) "Analyzing prompt with web context..." else "Generating answer 100% on-device...",
+                                        color = Color(0xFF64748B),
+                                        fontSize = 13.sp
+                                    )
+                                }
+                            }
+                        }
+                    }
+                } else if (activeSession == null && explanationResult == null && followUpList.isEmpty()) {
                     // Empty ChatGPT-Style Canvas (Reference Image 2)
                     EmptyStudyCanvas(
                         onPromptClick = { promptText ->
