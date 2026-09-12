@@ -1,0 +1,9 @@
+local.properties
+*.task
+*.tflite
+*.gguf
+/app/build/
+.gradle/
+*.iml
+.idea/
+build/
