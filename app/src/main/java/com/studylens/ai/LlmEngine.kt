@@ -9,10 +9,15 @@ import com.google.ai.edge.litertlm.Conversation
 import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.EngineConfig
+import com.google.ai.edge.litertlm.InputData
 import com.google.ai.edge.litertlm.Message
 import com.google.ai.edge.litertlm.MessageCallback
 import com.google.ai.edge.litertlm.SamplerConfig
+import com.google.ai.edge.litertlm.Session
+import com.google.ai.edge.litertlm.SessionConfig
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -34,11 +39,28 @@ import kotlin.coroutines.resume
  */
 class LlmEngine(private val context: Context) {
 
+    /**
+     * Engine.createConversation() unconditionally requires a vision encoder section in the
+     * model (visionBackend is a mandatory, non-nullable field in EngineConfig - confirmed via
+     * bytecode inspection, no "none" option exists), so it only works for genuinely multimodal
+     * models. Engine.createSession() has no such requirement (SessionConfig carries no vision
+     * fields at all) and IS able to load text-only models - confirmed on-device: Engine
+     * .initialize() already succeeds for a text-only model, only createConversation() was
+     * failing with "TF_LITE_VISION_ENCODER not found". So: try Conversation first (richer API,
+     * multi-turn, tool calling), and if that specific error occurs, fall back to the simpler
+     * Session API for that model for the rest of its lifetime. Image input is impossible in
+     * the Session path (correctly so - the model has no vision encoder to use).
+     */
+    private sealed class ChatHandle {
+        data class ViaConversation(val conversation: Conversation) : ChatHandle()
+        data class ViaSession(val session: Session) : ChatHandle()
+    }
+
     @Volatile
     private var engine: Engine? = null
 
     @Volatile
-    private var conversation: Conversation? = null
+    private var chatHandle: ChatHandle? = null
 
     @Volatile
     private var loadedFilename: String? = null
@@ -58,9 +80,13 @@ class LlmEngine(private val context: Context) {
      */
     fun invalidate() {
         synchronized(this) {
-            conversation?.close()
+            when (val handle = chatHandle) {
+                is ChatHandle.ViaConversation -> handle.conversation.close()
+                is ChatHandle.ViaSession -> handle.session.close()
+                null -> Unit
+            }
             engine?.close()
-            conversation = null
+            chatHandle = null
             engine = null
             loadedFilename = null
             activeBackendName = "none"
@@ -74,7 +100,7 @@ class LlmEngine(private val context: Context) {
     // in jniLibs/arm64-v8a AND an NPU-compiled model is used.
     //
     // GPU is also deliberately left out for the TEXT backend (not visionBackend below - see
-    // getOrCreateConversation). Confirmed via logcat + inspecting the litertlm-android:0.17.0
+    // getOrCreateChatHandle). Confirmed via logcat + inspecting the litertlm-android:0.17.0
     // AAR directly (it contains ONLY liblitertlm_jni.so, nothing else) that this device's
     // profile - WebGPU-only Adreno, no OpenCL - has no working token sampler: the runtime
     // needs a GPU-resident top-k sampler when the decode graph runs on GPU
@@ -90,11 +116,15 @@ class LlmEngine(private val context: Context) {
         "CPU" to Backend.CPU()
     )
 
-    private fun getOrCreateConversation(modelFile: File): Conversation {
-        conversation?.let { if (loadedFilename == modelFile.name) return it }
+    private fun getOrCreateChatHandle(modelFile: File): ChatHandle {
+        chatHandle?.let { if (loadedFilename == modelFile.name) return it }
         synchronized(this) {
-            conversation?.let { if (loadedFilename == modelFile.name) return it }
-            conversation?.close() // switching models - release the old one first
+            chatHandle?.let { if (loadedFilename == modelFile.name) return it }
+            when (val old = chatHandle) { // switching models - release the old one first
+                is ChatHandle.ViaConversation -> old.conversation.close()
+                is ChatHandle.ViaSession -> old.session.close()
+                null -> Unit
+            }
             engine?.close()
 
             var lastError: Exception? = null
@@ -118,26 +148,78 @@ class LlmEngine(private val context: Context) {
                     )
                     val newEngine = Engine(config)
                     newEngine.initialize()
-                    val newConversation = newEngine.createConversation(
-                        ConversationConfig(
-                            samplerConfig = if (backend is Backend.NPU) {
-                                null // matches Google's own code - NPU path skips sampler config
-                            } else {
-                                SamplerConfig(topK = 40, topP = 0.9, temperature = 0.8)
-                            }
+
+                    val handle: ChatHandle = try {
+                        ChatHandle.ViaConversation(
+                            newEngine.createConversation(
+                                ConversationConfig(
+                                    samplerConfig = if (backend is Backend.NPU) {
+                                        null // matches Google's own code - NPU path skips sampler config
+                                    } else {
+                                        SamplerConfig(topK = 40, topP = 0.9, temperature = 0.8)
+                                    }
+                                )
+                            )
                         )
-                    )
+                    } catch (conversationError: Exception) {
+                        if (conversationError.message?.contains("VISION_ENCODER") != true) throw conversationError
+                        // Text-only model - Conversation always requires a vision encoder
+                        // section (visionBackend is mandatory), but Session has no such
+                        // requirement, and initialize() already succeeded above.
+                        ChatHandle.ViaSession(newEngine.createSession(SessionConfig()))
+                    }
+
                     engine = newEngine
-                    conversation = newConversation
+                    chatHandle = handle
                     loadedFilename = modelFile.name
                     activeBackendName = name
-                    return newConversation
+                    return handle
                 } catch (e: Exception) {
                     lastError = e
                     // this backend isn't available on this build/device - step down and try the next
                 }
             }
             throw lastError ?: IllegalStateException("No backend could initialize the model")
+        }
+    }
+
+    /**
+     * Actually tries to load the currently-active model file right now, instead of waiting
+     * for the first chat message to discover it's broken (e.g. a format the Engine can't
+     * read - .task files' compatibility with this Engine API is unverified, unlike the
+     * proven-working .litertlm container). Returns null on success, or a user-facing error
+     * message on failure - the model picker uses this to roll back to the previous model
+     * with a clear reason instead of silently leaving the user on a model that will never
+     * actually answer anything.
+     */
+    suspend fun verifyActiveModelLoads(): String? = supervisorScope {
+        val modelFile = currentModelFile()
+        if (!modelFile.exists()) return@supervisorScope "Model file not found on disk."
+        try {
+            // getOrCreateChatHandle() is a plain blocking call with no suspension points, so
+            // wrapping it directly in withTimeoutOrNull wouldn't actually let us bail early on
+            // a true native hang (there'd be nothing for cancellation to interrupt until the
+            // call returns on its own). Racing it via async{}.await() gives a real suspension
+            // point, so a stuck load can't leave the caller (and the model picker UI) waiting
+            // forever.
+            //
+            // supervisorScope, not coroutineScope: a plain coroutineScope propagates a failed
+            // async child's exception up through the job hierarchy immediately (crashing the
+            // app before .await() is even reached, bypassing this try/catch entirely - this
+            // is exactly what happened when an unsupported model file threw inside the async
+            // block). supervisorScope defers that failure until .await() is actually called,
+            // which is what lets us catch it below.
+            val deferred = async(Dispatchers.IO) { getOrCreateChatHandle(modelFile) }
+            val loaded = withTimeoutOrNull(MODEL_LOAD_TIMEOUT_MS) { deferred.await() }
+            if (loaded == null) {
+                deferred.cancel() // best-effort - the orphaned native call may keep running regardless
+                invalidate() // drop whatever half-initialized state it left behind
+                "Timed out after ${MODEL_LOAD_TIMEOUT_MS / 1000}s trying to load this model - it may not be supported on this device."
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            e.message?.takeIf { it.isNotBlank() } ?: "This model failed to load (${e.javaClass.simpleName})."
         }
     }
 
@@ -155,51 +237,87 @@ class LlmEngine(private val context: Context) {
             if (!modelFile.exists()) {
                 return@withContext "The on-device model isn't loaded on this device yet."
             }
-            val conv = getOrCreateConversation(modelFile)
-            val contents = mutableListOf<Content>()
+            when (val handle = getOrCreateChatHandle(modelFile)) {
+                is ChatHandle.ViaConversation -> generateViaConversation(handle.conversation, prompt, image)
+                is ChatHandle.ViaSession -> generateViaSession(handle.session, prompt, image)
+            }
+        } catch (e: Exception) {
+            "Sorry, I couldn't generate an explanation just now. Please try again."
+        }
+    }
+
+    private suspend fun generateViaConversation(conv: Conversation, prompt: String, image: Bitmap?): String {
+        val contents = mutableListOf<Content>()
+        if (image != null) {
+            // Camera/gallery photos can be 8-12MP - feeding that straight into the vision
+            // encoder is what was hanging the GPU for 10s+ and freezing the UI (fence
+            // timeouts, "Failed to lock tensor buffer" in logcat). Downscaling first keeps
+            // the vision encoder's input in the size range it actually expects.
+            contents.add(Content.ImageBytes(image.downscaleForVisionModel().toPngByteArray()))
+        }
+        if (prompt.isNotBlank()) {
+            contents.add(Content.Text(prompt))
+        }
+
+        val result = withTimeoutOrNull(VISION_TIMEOUT_MS) {
+            suspendCancellableCoroutine { cont ->
+                val response = StringBuilder()
+                conv.sendMessageAsync(
+                    Contents.of(contents),
+                    object : MessageCallback {
+                        override fun onMessage(message: Message) {
+                            response.append(message.toString())
+                        }
+
+                        override fun onDone() {
+                            if (cont.isActive) cont.resume(response.toString())
+                        }
+
+                        override fun onError(throwable: Throwable) {
+                            if (cont.isActive) {
+                                cont.resume("Sorry, I couldn't generate an explanation just now. Please try again.")
+                            }
+                        }
+                    },
+                    emptyMap()
+                )
+            }
+        }
+        return result ?: run {
+            // The model/GPU hung past the timeout - drop this conversation so the next
+            // attempt starts clean instead of piling onto a stuck backend.
+            invalidate()
             if (image != null) {
-                // Camera/gallery photos can be 8-12MP - feeding that straight into the vision
-                // encoder is what was hanging the GPU for 10s+ and freezing the UI (fence
-                // timeouts, "Failed to lock tensor buffer" in logcat). Downscaling first keeps
-                // the vision encoder's input in the size range it actually expects.
-                contents.add(Content.ImageBytes(image.downscaleForVisionModel().toPngByteArray()))
+                "This device's GPU is taking too long to read that photo. Try a clearer, closer photo of just the problem, or ask as a text question instead."
+            } else {
+                "This is taking longer than expected. Please try again."
             }
-            if (prompt.isNotBlank()) {
-                contents.add(Content.Text(prompt))
-            }
+        }
+    }
 
-            val result = withTimeoutOrNull(VISION_TIMEOUT_MS) {
-                suspendCancellableCoroutine { cont ->
-                    val response = StringBuilder()
-                    conv.sendMessageAsync(
-                        Contents.of(contents),
-                        object : MessageCallback {
-                            override fun onMessage(message: Message) {
-                                response.append(message.toString())
-                            }
-
-                            override fun onDone() {
-                                if (cont.isActive) cont.resume(response.toString())
-                            }
-
-                            override fun onError(throwable: Throwable) {
-                                if (cont.isActive) {
-                                    cont.resume("Sorry, I couldn't generate an explanation just now. Please try again.")
-                                }
-                            }
-                        },
-                        emptyMap()
-                    )
+    private suspend fun generateViaSession(session: Session, prompt: String, image: Bitmap?): String {
+        if (image != null) {
+            // This model has no vision encoder at all (that's exactly why it's on the
+            // Session path instead of Conversation) - there's no way to make it read an
+            // image, so say so clearly instead of silently ignoring the photo.
+            return "This model can only read text, not images - switch to a multimodal model (like Qwen2-VL 2B) to analyze photos."
+        }
+        return try {
+            supervisorScope {
+                // Same reasoning as verifyActiveModelLoads(): generateContent() is a plain
+                // blocking call, so it's raced via async{}.await() (a real suspension point)
+                // under supervisorScope (so a failure inside doesn't crash the app before
+                // .await() is reached - see the comment there for the full explanation).
+                val deferred = async(Dispatchers.IO) {
+                    session.generateContent(listOf(InputData.Text(prompt)))
                 }
-            }
-            result ?: run {
-                // The model/GPU hung past the timeout - drop this conversation so the next
-                // attempt starts clean instead of piling onto a stuck backend.
-                invalidate()
-                if (image != null) {
-                    "This device's GPU is taking too long to read that photo. Try a clearer, closer photo of just the problem, or ask as a text question instead."
-                } else {
+                val result = withTimeoutOrNull(VISION_TIMEOUT_MS) { deferred.await() }
+                if (result == null) {
+                    deferred.cancel()
+                    invalidate()
                     "This is taking longer than expected. Please try again."
+                } else {
+                    result
                 }
             }
         } catch (e: Exception) {
@@ -227,5 +345,6 @@ class LlmEngine(private val context: Context) {
     private companion object {
         const val MAX_IMAGE_EDGE_PX = 1024
         const val VISION_TIMEOUT_MS = 45_000L
+        const val MODEL_LOAD_TIMEOUT_MS = 60_000L
     }
 }

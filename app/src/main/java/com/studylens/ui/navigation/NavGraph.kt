@@ -79,6 +79,7 @@ fun NavGraph(
     val contextRecap by actualViewModel.contextRecap.collectAsState()
     val vitals by actualViewModel.vitals.collectAsState()
     val isOnline by actualViewModel.isOnline.collectAsState()
+    val isMultimodalSupported by actualViewModel.isMultimodalSupported.collectAsState()
     val isSpeaking by actualViewModel.ttsManager.isSpeaking.collectAsState()
 
     val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
@@ -301,9 +302,6 @@ fun NavGraph(
                         if (activeSession == null || explanationResult == null) {
                             actualViewModel.explainCurrentCapture(customText = caption, image = bitmap)
                         } else {
-                            // Mid-conversation photo - treat it as a new topic, same as
-                            // starting fresh, rather than trying to fold an image into a
-                            // text-only follow-up.
                             actualViewModel.startNewSession()
                             actualViewModel.explainCurrentCapture(customText = caption, image = bitmap)
                         }
@@ -312,7 +310,8 @@ fun NavGraph(
                     onToggleFocusMode = { actualViewModel.toggleFocusMode() },
                     onTriggerIntentToSwitch = { actualViewModel.triggerIntentToSwitch() },
                     onTakeBreak = { actualViewModel.startPlannedBreak(60000L) },
-                    onEmergencyExit = { actualViewModel.triggerEmergencyExit() }
+                    onEmergencyExit = { actualViewModel.triggerEmergencyExit() },
+                    isMultimodalSupported = isMultimodalSupported
                 )
             }
 
