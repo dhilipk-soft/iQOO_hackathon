@@ -6,9 +6,8 @@ import org.json.JSONObject
 
 /**
  * One entry in the in-app model picker. `available` is derived from downloadUrl, not read
- * from the JSON as a separate manual flag - a real URL makes a model available automatically,
- * a REPLACE_ME placeholder (e.g. Gemma, pending the team's re-hosted public copy) doesn't.
- * This avoids the "I updated the URL but forgot to also flip available:true" mistake.
+ * from the JSON as a separate manual flag.
+ * `isMultimodal` dictates whether image uploads are supported.
  */
 data class DownloadableModel(
     val id: String,
@@ -24,14 +23,17 @@ data class DownloadableModel(
     // (which is about hosting/URLs): a model can be fully hosted and downloaded and STILL be
     // knownIncompatible, in which case the picker must never offer to switch to it, even if
     // the file is already sitting on disk from earlier testing.
-    val knownIncompatible: Boolean = false
+    val knownIncompatible: Boolean = false,
+    // Drives whether the chat UI offers image upload for the active model - text-only
+    // models (none currently in the catalog, but the field stays for when one works) should
+    // hide that entry point rather than let the user attach a photo the model can't read.
+    val isMultimodal: Boolean = true
 )
 
 object ModelCatalog {
     private const val PLACEHOLDER_MARKER = "REPLACE_ME"
 
-    /** Reads app/src/main/assets/models.json - bundled with the app, no network needed to
-     * see the list itself, only to actually download a model. */
+    /** Reads app/src/main/assets/models.json - bundled with the app. */
     fun loadModels(context: Context): List<DownloadableModel> {
         return try {
             val json = context.assets.open("models.json").bufferedReader().use { it.readText() }
@@ -48,7 +50,8 @@ object ModelCatalog {
                     sizeBytes = o.getLong("sizeBytes"),
                     downloadUrl = url,
                     available = !url.contains(PLACEHOLDER_MARKER, ignoreCase = true),
-                    knownIncompatible = o.optBoolean("knownIncompatible", false)
+                    knownIncompatible = o.optBoolean("knownIncompatible", false),
+                    isMultimodal = o.optBoolean("isMultimodal", true)
                 )
             }
         } catch (e: Exception) {

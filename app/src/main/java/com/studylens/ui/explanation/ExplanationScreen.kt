@@ -3,6 +3,9 @@ package com.studylens.ui.explanation
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -282,6 +285,11 @@ fun ExplanationScreen(
                 value = followUpInput,
                 onValueChange = { followUpInput = it },
                 placeholder = { Text("Ask follow-up (e.g. give an example)...", fontSize = 12.sp, color = Color(0xFF64748B)) },
+                keyboardOptions = KeyboardOptions(
+                    capitalization = KeyboardCapitalization.Sentences,
+                    autoCorrect = false,
+                    imeAction = ImeAction.Send
+                ),
                 modifier = Modifier
                     .weight(1f)
                     .height(52.dp),

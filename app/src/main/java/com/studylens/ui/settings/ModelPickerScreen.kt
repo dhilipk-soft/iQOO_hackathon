@@ -4,7 +4,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -31,13 +30,13 @@ import kotlinx.coroutines.withContext
 
 /**
  * In-app model picker - browse the bundled catalog (models.json), download an ungated
- * model over plain HTTPS (no Hugging Face login), and switch LlmEngine to use it.
- * Gemma stays as the always-present default; this adds options, it doesn't replace it.
+ * model over plain HTTPS, and switch LlmEngine to use it.
  */
 @Composable
 fun ModelPickerScreen(
     llmEngine: LlmEngine,
     onBack: () -> Unit,
+    onModelActivated: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -58,6 +57,7 @@ fun ModelPickerScreen(
         verifyingModelId = model.id
         downloadManager.setActiveModel(model)
         llmEngine.invalidate()
+        onModelActivated() // refresh isMultimodalSupported etc. - optimistic, corrected below on rollback
         activeFilename = model.filename
         scope.launch {
             // NonCancellable: rememberCoroutineScope() is tied to this screen's lifecycle,
@@ -79,6 +79,7 @@ fun ModelPickerScreen(
                         downloadManager.clearActiveModel()
                     }
                     llmEngine.invalidate()
+                    onModelActivated() // reflect the rolled-back model, not the failed one
                     activeFilename = ModelDownloadManager.getActiveModelFilename(context)
                     errorMessage = "${model.displayName} couldn't be loaded on this device: $failureReason"
                 }
@@ -90,6 +91,7 @@ fun ModelPickerScreen(
     fun deleteModel(model: DownloadableModel) {
         downloadManager.deleteDownloadedModel(model)
         llmEngine.invalidate()
+        onModelActivated() // deleting the active model falls back to the default - reflect that
         activeFilename = ModelDownloadManager.getActiveModelFilename(context)
         errorMessage = null
     }
@@ -116,7 +118,7 @@ fun ModelPickerScreen(
 
         Text(
             text = "All models run 100% on-device, zero network calls once downloaded. " +
-                "Bigger models may reason better but use more storage, RAM, and battery.",
+                "Multimodal models support image upload, while text-only models process text prompts.",
             color = Color(0xFF64748B),
             fontSize = 12.sp,
             lineHeight = 17.sp,

@@ -21,6 +21,10 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -88,6 +92,7 @@ fun StudyChatScreen(
     onTakeQuiz: () -> Unit,
     onToggleSimulatedNetwork: () -> Unit,
     onExplainImage: (Bitmap, String) -> Unit = { _, _ -> },
+    isMultimodalSupported: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -565,13 +570,18 @@ fun StudyChatScreen(
                         }
                     }
                 } else if (activeSession == null && explanationResult == null && followUpList.isEmpty()) {
-                    // Empty ChatGPT-Style Canvas (Reference Image 2)
+                    // Empty ChatGPT-Style Canvas
                     EmptyStudyCanvas(
                         onPromptClick = { promptText ->
                             inputText = promptText
                             onAskQuestion(promptText)
                         },
-                        onOpenMedia = { showMediaSheet = true }
+                        onOpenMedia = {
+                            if (isMultimodalSupported) {
+                                showMediaSheet = true
+                            }
+                        },
+                        isMultimodalSupported = isMultimodalSupported
                     )
                 } else {
                     // Active Study Session View (Reference Image 1 Screens 3 & 4)
@@ -744,7 +754,8 @@ fun StudyChatScreen(
                         onOpenPlus = { showMediaSheet = true },
                         onVoiceTap = {
                             inputText = "What is the discriminant formula?"
-                        }
+                        },
+                        isMultimodalSupported = isMultimodalSupported
                     )
                 }
 
@@ -806,6 +817,7 @@ private fun rotateBitmapIfRequired(filePath: String, bitmap: Bitmap): Bitmap {
 fun EmptyStudyCanvas(
     onPromptClick: (String) -> Unit,
     onOpenMedia: () -> Unit,
+    isMultimodalSupported: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -843,7 +855,7 @@ fun EmptyStudyCanvas(
             )
             Spacer(modifier = Modifier.height(6.dp))
             Text(
-                text = "Type a question, take a camera photo, or pick a suggestion",
+                text = if (isMultimodalSupported) "Type a question, take a camera photo, or pick a suggestion" else "Type a question or pick a prompt suggestion",
                 color = Color(0xFF64748B),
                 fontSize = 13.sp
             )
@@ -851,17 +863,25 @@ fun EmptyStudyCanvas(
 
         Spacer(modifier = Modifier.weight(1f))
 
-        // 3 Prompt Suggestions (Image 2 style)
+        // Prompt Suggestions
         Column(
             verticalArrangement = Arrangement.spacedBy(10.dp),
             modifier = Modifier
                 .padding(bottom = 90.dp)
         ) {
-            PromptActionChip(
-                icon = "📷",
-                text = "Scan textbook page with Camera",
-                onClick = onOpenMedia
-            )
+            if (isMultimodalSupported) {
+                PromptActionChip(
+                    icon = "📷",
+                    text = "Scan textbook page with Camera",
+                    onClick = onOpenMedia
+                )
+            } else {
+                PromptActionChip(
+                    icon = "💬",
+                    text = "Explain a science or math concept",
+                    onClick = { onPromptClick("Explain Photosynthesis in simple terms") }
+                )
+            }
             PromptActionChip(
                 icon = "✍️",
                 text = "Explain Quadratic Equation & formula",
@@ -1211,6 +1231,7 @@ fun BottomStudyInputBar(
     onSend: () -> Unit,
     onOpenPlus: () -> Unit,
     onVoiceTap: () -> Unit,
+    isMultimodalSupported: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     // Pill-shaped container matching Image 2
@@ -1233,17 +1254,25 @@ fun BottomStudyInputBar(
                 .padding(horizontal = 8.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Plus Icon for adding photos/media (Opens Camera & Gallery picker)
+            // Plus Icon for adding photos/media (Opens Camera & Gallery picker if supported by model)
             IconButton(
-                onClick = onOpenPlus,
+                onClick = {
+                    if (isMultimodalSupported) {
+                        onOpenPlus()
+                    }
+                },
+                enabled = isMultimodalSupported,
                 modifier = Modifier
                     .size(40.dp)
-                    .background(Color(0xFFF1F5F9), shape = CircleShape)
+                    .background(
+                        if (isMultimodalSupported) Color(0xFFF1F5F9) else Color(0xFFF1F5F9).copy(alpha = 0.4f),
+                        shape = CircleShape
+                    )
             ) {
                 Icon(
                     imageVector = Icons.Default.Add,
-                    contentDescription = "Add photos or media",
-                    tint = Color(0xFF475569),
+                    contentDescription = if (isMultimodalSupported) "Add photos or media" else "Image attachment unsupported by text-only model",
+                    tint = if (isMultimodalSupported) Color(0xFF475569) else Color(0xFF94A3B8).copy(alpha = 0.4f),
                     modifier = Modifier.size(22.dp)
                 )
             }
@@ -1261,6 +1290,18 @@ fun BottomStudyInputBar(
                         fontSize = 15.sp
                     )
                 },
+                keyboardOptions = KeyboardOptions(
+                    capitalization = KeyboardCapitalization.Sentences,
+                    autoCorrect = false,
+                    imeAction = ImeAction.Send
+                ),
+                keyboardActions = KeyboardActions(
+                    onSend = {
+                        if (inputText.isNotBlank()) {
+                            onSend()
+                        }
+                    }
+                ),
                 colors = TextFieldDefaults.colors(
                     focusedContainerColor = Color.Transparent,
                     unfocusedContainerColor = Color.Transparent,

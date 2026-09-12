@@ -6,6 +6,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.studylens.ai.ExplainPipeline
 import com.studylens.ai.LlmEngine
+import com.studylens.ai.ModelDownloadManager
 import com.studylens.ai.RetrievalClient
 import com.studylens.input.data.AppDatabase
 import com.studylens.input.data.ChatMessageEntity
@@ -64,6 +65,15 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
     // Observable states
     private val _isOnline = MutableStateFlow(true)
     val isOnline: StateFlow<Boolean> = _isOnline.asStateFlow()
+
+    private val _isMultimodalSupported = MutableStateFlow(
+        ModelDownloadManager.getActiveModelIsMultimodal(application)
+    )
+    val isMultimodalSupported: StateFlow<Boolean> = _isMultimodalSupported.asStateFlow()
+
+    fun refreshActiveModelCapabilities() {
+        _isMultimodalSupported.value = ModelDownloadManager.getActiveModelIsMultimodal(getApplication())
+    }
 
     private val _vitals = MutableStateFlow(
         InferenceStats(tokensPerSecond = 0.0, latencyMs = 0, ramUsedMb = 0, thermalStatus = "NORMAL")

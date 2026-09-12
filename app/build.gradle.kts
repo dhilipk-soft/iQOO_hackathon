@@ -98,9 +98,15 @@ dependencies {
     // processor, so nothing here needs a Kotlin-metadata-compatible compiler plugin.
     implementation("androidx.work:work-runtime-ktx:2.9.0")
 
-    // On-device LLM — LiteRT-LM, needed for multimodal (image) support via
-    // LlmInferenceSession-equivalent Engine/Conversation/Content API (see ai/LlmEngine.kt).
+    // On-device LLM - litertlm-android (Engine/Conversation/Session API) is what
+    // LlmEngine.kt actually uses (Kotlin 2.4-compatible, supports multimodal .litertlm
+    // models - confirmed working end-to-end with Qwen2-VL 2B, Gemma 4 E2B, FastVLM 0.5B).
+    // tasks-genai/tasks-core/tasks-vision are kept only because MediaPipeEngineManager.kt
+    // still references them - that class isn't wired into LlmEngine or any active screen.
     implementation("com.google.ai.edge.litertlm:litertlm-android:0.17.0")
+    implementation("com.google.mediapipe:tasks-genai:0.10.24")
+    implementation("com.google.mediapipe:tasks-core:0.10.14")
+    implementation("com.google.mediapipe:tasks-vision:0.10.14")
 
     // Networking, for OpenRouter retrieval call
     implementation("com.squareup.retrofit2:retrofit:2.11.0")

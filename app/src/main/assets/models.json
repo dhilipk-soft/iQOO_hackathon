@@ -6,23 +6,26 @@
       "description": "Alibaba's vision model - reads images directly, no login required. Confirmed working on this device.",
       "filename": "Qwen2-VL-2B.litertlm",
       "sizeBytes": 1783424544,
-      "downloadUrl": "https://huggingface.co/litert-community/Qwen2-VL-2B/resolve/main/Qwen2-VL-2B.litertlm"
+      "downloadUrl": "https://huggingface.co/litert-community/Qwen2-VL-2B/resolve/main/Qwen2-VL-2B.litertlm",
+      "isMultimodal": true
     },
     {
       "id": "gemma-4-e2b-it",
       "displayName": "Gemma 4 E2B (multimodal)",
-      "description": "Google's newest on-device model - text, vision, and audio in one model, no login required.",
+      "description": "Google's newest on-device model - text, vision, and audio in one model, no login required. Confirmed working on this device.",
       "filename": "gemma-4-E2B-it.litertlm",
       "sizeBytes": 2588147712,
-      "downloadUrl": "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm"
+      "downloadUrl": "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm",
+      "isMultimodal": true
     },
     {
       "id": "fastvlm-0.5b",
       "displayName": "FastVLM 0.5B (multimodal, fastest)",
-      "description": "Apple's compact vision-language model - smallest and fastest option here, no login required.",
+      "description": "Apple's compact vision-language model - smallest and fastest option here, no login required. Confirmed working on this device.",
       "filename": "FastVLM-0.5B.litertlm",
       "sizeBytes": 1156342768,
-      "downloadUrl": "https://huggingface.co/litert-community/FastVLM-0.5B/resolve/main/FastVLM-0.5B.litertlm"
+      "downloadUrl": "https://huggingface.co/litert-community/FastVLM-0.5B/resolve/main/FastVLM-0.5B.litertlm",
+      "isMultimodal": true
     }
   ]
 }
