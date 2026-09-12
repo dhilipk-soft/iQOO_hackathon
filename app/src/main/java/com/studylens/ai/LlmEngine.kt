@@ -1,126 +1,86 @@
 package com.studylens.ai
 
 import android.content.Context
-import android.util.Log
+import com.google.ai.edge.litertlm.Backend
+import com.google.ai.edge.litertlm.Conversation
+import com.google.ai.edge.litertlm.Engine
+import com.google.ai.edge.litertlm.EngineConfig
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.io.File
 
+/**
+ * Wraps the on-device Gemma model via LiteRT-LM, targeting the iQOO 15's dedicated NPU
+ * first (implementation-plan.md §3b) so inference genuinely runs on the phone's AI
+ * accelerator rather than just the GPU/CPU. Tries NPU -> GPU -> CPU in order and sticks
+ * with whichever one actually initializes, so a missing NPU delegate on this exact build
+ * never crashes or freezes the app — it just quietly steps down a tier.
+ */
 class LlmEngine(private val context: Context) {
 
-    suspend fun generateResponse(prompt: String): String {
-        Log.d(TAG, "LlmEngine.generateResponse called with prompt: '$prompt'")
-        val startTime = System.currentTimeMillis()
+    // Chip-specific model (compiled for the iQOO 15's SM8850 chip), pushed onto the device
+    // via adb into the app's own files dir:
+    //   adb push Gemma3-1B-IT_q4_ekv1280_sm8850.litertlm /data/local/tmp/
+    //   adb shell run-as com.studylens cp /data/local/tmp/Gemma3-1B-IT_q4_ekv1280_sm8850.litertlm /data/data/com.studylens/files/
+    private val modelFile = File(context.filesDir, "Gemma3-1B-IT_q4_ekv1280_sm8850.litertlm")
 
-        val response = buildStructuredResponse(prompt)
+    @Volatile
+    private var engine: Engine? = null
 
-        val durationMs = System.currentTimeMillis() - startTime
-        Log.d(TAG, "LlmEngine inference completed in ${durationMs}ms")
-        return response
-    }
+    @Volatile
+    private var conversation: Conversation? = null
 
-    private fun buildStructuredResponse(prompt: String): String {
-        val lower = prompt.lowercase()
+    /** Which backend actually ended up loading — read this for the Device Vitals strip (§3b). */
+    @Volatile
+    var activeBackendName: String = "none"
+        private set
 
-        return when {
-            lower.contains("photosynthesis") -> """
-                Photosynthesis is the biological process by which green plants, algae, and cyanobacteria convert light energy into chemical energy stored in glucose.
-                
-                🧪 Chemical Equation:
-                6CO₂ + 6H₂O + Light Energy ➔ C₆H₁₂O₆ + 6O₂
-                
-                📌 Key Stages:
-                1. Light-Dependent Reactions: Occur in the thylakoid membranes of chloroplasts, converting solar energy into ATP and NADPH while releasing oxygen as a byproduct.
-                2. Light-Independent Reactions (Calvin Cycle): Occur in the stroma, using ATP and NADPH to fix carbon dioxide into 3-carbon sugars (G3P).
-                
-                💡 Essential Takeaway:
-                Photosynthesis provides the primary energy source for nearly all ecosystems and maintains Earth's atmospheric oxygen levels.
-            """.trimIndent()
+    private fun backendsToTry(): List<Pair<String, Backend>> = listOf(
+        "NPU" to Backend.NPU(nativeLibraryDir = context.applicationInfo.nativeLibraryDir),
+        "GPU" to Backend.GPU(),
+        "CPU" to Backend.CPU()
+    )
 
-            lower.contains("newton") || lower.contains("force") || lower.contains("motion") -> """
-                Newton's Laws of Motion describe the fundamental relationship between a body's mass, the net forces acting upon it, and its resulting movement.
-                
-                ⚙️ Key Laws:
-                1. First Law (Inertia): An object remains at rest or in uniform linear motion unless acted upon by a net external force.
-                2. Second Law (Force & Acceleration): The net force on an object equals its mass times acceleration (F = m · a).
-                3. Third Law (Action-Reaction): Whenever one body exerts a force on another, the second body exerts an equal and opposite force on the first (F_AB = -F_BA).
-                
-                💡 Essential Takeaway:
-                Newtonian mechanics provides the foundation for classical physics, engineering design, and orbital mechanics.
-            """.trimIndent()
-
-            lower.contains("calculus") || lower.contains("integration") || lower.contains("integral") -> """
-                Integration is a fundamental concept in calculus representing the continuous accumulation of quantities, such as areas under curves or total displacement.
-                
-                📐 Key Integration Rules:
-                1. Power Rule: ∫ xⁿ dx = (xⁿ⁺¹ / n+1) + C  (for n ≠ -1)
-                2. Integration by Parts: ∫ u dv = uv - ∫ v du  (derived from the product rule)
-                3. LIATE Selection Strategy: Choose 'u' in order of Logarithmic, Inverse trig, Algebraic, Trigonometric, Exponential.
-                
-                💡 Essential Takeaway:
-                Definite integrals compute net accumulated totals, while indefinite integrals yield anti-derivatives.
-            """.trimIndent()
-
-            lower.contains("quadratic") || lower.contains("discriminant") -> """
-                A quadratic equation is a second-degree polynomial equation expressed in the standard form: ax² + bx + c = 0 (where a ≠ 0).
-                
-                📐 Formula & Discriminant:
-                Quadratic Formula: x = (-b ± √(b² - 4ac)) / (2a)
-                Discriminant (Δ = b² - 4ac):
-                • Δ > 0: Two distinct real roots
-                • Δ = 0: One repeated real root
-                • Δ < 0: Two complex conjugate roots
-                
-                💡 Essential Takeaway:
-                The discriminant completely dictates the nature and geometric intercepts of the parabola.
-            """.trimIndent()
-
-            lower.contains("pythagor") || lower.contains("triangle") -> """
-                The Pythagorean Theorem states that in any right-angled triangle, the square of the length of the hypotenuse is equal to the sum of the squares of the lengths of the other two sides.
-                
-                📐 Formula:
-                a² + b² = c²  (where c is the hypotenuse opposite the 90° angle)
-                
-                📌 Common Pythagorean Triples:
-                • (3, 4, 5) ➔ 9 + 16 = 25
-                • (5, 12, 13) ➔ 25 + 144 = 169
-                
-                💡 Essential Takeaway:
-                Used extensively in geometry, trigonometry, vector decomposition, and distance calculations in Euclidean space.
-            """.trimIndent()
-
-            lower.contains("python") || lower.contains("programming") || lower.contains("code") -> """
-                Python is a high-level, interpreted, general-purpose programming language known for its readable syntax and vast library ecosystem.
-                
-                💻 Core Features:
-                1. Dynamic Typing & Garbage Collection: Automatic memory management and variable type inference.
-                2. Rich Ecosystem: Dominant in Artificial Intelligence, Machine Learning (PyTorch, TensorFlow), Data Science (Pandas, NumPy), and Web Backend (FastAPI, Django).
-                3. List Comprehensions: [x**2 for x in range(10) if x % 2 == 0]
-                
-                💡 Essential Takeaway:
-                Python emphasizes developer productivity and readability over raw execution speed.
-            """.trimIndent()
-
-            else -> {
-                val topicName = prompt.take(40).replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
-                """
-                Core Analysis for: "$topicName"
-                
-                📖 Concept Summary:
-                "$prompt" represents a key topic in academic studies. On-device analysis synthesizes the foundational principles behind this query into structured insights.
-                
-                📌 Key Principles:
-                1. Fundamental Rule: Understanding the core definitions and underlying mechanics of this concept.
-                2. Analytical Relationship: Examining how individual components interact within the overarching domain.
-                3. Practical Application: Applying these principles to solve structured problems and evaluate real-world scenarios.
-                
-                💡 Essential Takeaway:
-                Mastering $topicName provides a baseline framework for further problem solving and systematic review.
-                """.trimIndent()
+    private fun getOrCreateConversation(): Conversation {
+        conversation?.let { return it }
+        synchronized(this) {
+            conversation?.let { return it }
+            var lastError: Exception? = null
+            for ((name, backend) in backendsToTry()) {
+                try {
+                    val config = EngineConfig(modelPath = modelFile.absolutePath, backend = backend)
+                    val newEngine = Engine(config)
+                    newEngine.initialize()
+                    val newConversation = newEngine.createConversation()
+                    engine = newEngine
+                    conversation = newConversation
+                    activeBackendName = name
+                    return newConversation
+                } catch (e: Exception) {
+                    lastError = e
+                    // this backend isn't available on this build/device — step down and try the next
+                }
             }
+            throw lastError ?: IllegalStateException("No backend could initialize the model")
         }
     }
 
-    companion object {
-        private const val TAG = "LlmEngine"
+    /**
+     * Always returns something usable — never throws, never blocks indefinitely.
+     * On any failure (model missing, no backend available, OOM, thermal issue) returns a
+     * plain fallback string so the app never freezes or crashes on stage.
+     */
+    suspend fun generateResponse(prompt: String): String = withContext(Dispatchers.IO) {
+        try {
+            if (!modelFile.exists()) {
+                return@withContext "The on-device model isn't loaded on this device yet."
+            }
+            val conv = getOrCreateConversation()
+            val response = StringBuilder()
+            conv.sendMessageAsync(prompt).collect { chunk -> response.append(chunk.toString()) }
+            response.toString()
+        } catch (e: Exception) {
+            "Sorry, I couldn't generate an explanation just now. Please try again."
+        }
     }
 }
-
-

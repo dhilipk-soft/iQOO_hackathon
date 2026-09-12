@@ -15,7 +15,6 @@ import com.studylens.shared.QuizQuestion
 import com.studylens.shared.StudyCapture
 import com.studylens.shared.StudySession
 import com.studylens.ui.tts.TtsManager
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -295,20 +294,18 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val startTime = System.currentTimeMillis()
             val online = _isOnline.value
+            val capture = StudyCapture(id = startTime, extractedText = textToProcess, timestamp = startTime)
 
-            val capture = StudyCapture(
-                id = System.currentTimeMillis(),
-                extractedText = textToProcess,
-                timestamp = System.currentTimeMillis()
-            )
-
+            // Real pipeline: on-device model always runs; retrieval only blends in if online (§3a).
             val result = explainPipeline.explain(capture, online)
 
             val latency = System.currentTimeMillis() - startTime
             val wordCount = result.finalExplanation.split("\\s+".toRegex()).size
-            val tokensPerSec = String.format(java.util.Locale.US, "%.1f", (wordCount * 1.3) / (latency / 1000.0).coerceAtLeast(0.5)).toDoubleOrNull() ?: 28.5
+            val tokensPerSec = String.format(
+                java.util.Locale.US, "%.1f", (wordCount * 1.3) / (latency / 1000.0).coerceAtLeast(0.5)
+            ).toDoubleOrNull() ?: 0.0
 
-            _vitals.value = InferenceStats(
+            _vitals.value = _vitals.value.copy(
                 tokensPerSecond = tokensPerSec,
                 latencyMs = latency,
                 ramUsedMb = vitalsMonitor.getRamUsedMb().coerceAtLeast(312),
@@ -316,9 +313,8 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
             )
 
             val (topicTitle, topicSubject, topicFormula) = deriveTopicDetails(textToProcess)
-
             val newSession = StudyTopicSession(
-                id = "session_${System.currentTimeMillis()}",
+                id = "session_$startTime",
                 title = topicTitle,
                 subject = topicSubject,
                 previewText = textToProcess,
@@ -331,9 +327,7 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
                 ),
                 followUps = emptyList()
             )
-
-            val updatedHistory = listOf(newSession) + _sessionHistory.value.filter { it.id != newSession.id }
-            _sessionHistory.value = updatedHistory
+            _sessionHistory.value = listOf(newSession) + _sessionHistory.value.filter { it.id != newSession.id }
             _activeSession.value = newSession
 
             _explanationResult.value = result
@@ -347,21 +341,19 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
 
         viewModelScope.launch {
             val startTime = System.currentTimeMillis()
-
             val capture = StudyCapture(
-                id = _explanationResult.value?.captureId ?: System.currentTimeMillis(),
+                id = _explanationResult.value?.captureId ?: startTime,
                 extractedText = _capturedText.value,
-                timestamp = System.currentTimeMillis()
+                timestamp = startTime
             )
-            val currentExp = _explanationResult.value?.finalExplanation ?: _activeSession.value?.explanation ?: ""
+            val currentExplanation = _explanationResult.value?.finalExplanation
+                ?: _activeSession.value?.explanation
+                ?: ""
 
-            val answerText = explainPipeline.answerFollowUp(capture, currentExp, question)
+            val answerText = explainPipeline.answerFollowUp(capture, currentExplanation, question)
 
             val latency = System.currentTimeMillis() - startTime
-            _vitals.value = _vitals.value.copy(
-                tokensPerSecond = 31.2,
-                latencyMs = latency
-            )
+            _vitals.value = _vitals.value.copy(latencyMs = latency)
 
             val newMessage = FollowUpMessage(
                 id = System.currentTimeMillis().toString(),
@@ -377,32 +369,15 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
         _selectedQuizAnswers.value = emptyMap()
         _quizSubmitted.value = false
 
-        _quizQuestions.value = listOf(
-            QuizQuestion(
-                id = 1L,
-                captureId = 101L,
-                topic = "Calculus (Derivation)",
-                question = "Integration by parts is derived from which fundamental rule of calculus?",
-                options = listOf("The Product Rule", "The Chain Rule", "The Quotient Rule", "L'Hôpital's Rule"),
-                correctAnswer = "The Product Rule"
-            ),
-            QuizQuestion(
-                id = 2L,
-                captureId = 101L,
-                topic = "LIATE Strategy",
-                question = "According to the LIATE rule, which function type has the highest priority to be chosen as 'u'?",
-                options = listOf("Algebraic (x²)", "Logarithmic (ln x)", "Exponential (eˣ)", "Trigonometric (cos x)"),
-                correctAnswer = "Logarithmic (ln x)"
-            ),
-            QuizQuestion(
-                id = 3L,
-                captureId = 101L,
-                topic = "Formula Verification",
-                question = "What is the correct right-hand side of ∫ u dv?",
-                options = listOf("uv - ∫ v du", "uv + ∫ v du", "u'v - v'u", "∫ u du - ∫ v dv"),
-                correctAnswer = "uv - ∫ v du"
+        viewModelScope.launch {
+            val startTime = System.currentTimeMillis()
+            val capture = StudyCapture(
+                id = startTime,
+                extractedText = _capturedText.value,
+                timestamp = startTime
             )
-        )
+            _quizQuestions.value = explainPipeline.generateQuiz(capture)
+        }
     }
 
     fun selectQuizAnswer(questionId: Long, selectedOption: String) {

@@ -1,6 +1,6 @@
 package com.studylens.ai
 
-import android.util.Log
+import com.studylens.BuildConfig
 import com.studylens.shared.ExplanationResult
 import com.studylens.shared.QuizQuestion
 import com.studylens.shared.StudyBrain
@@ -11,46 +11,38 @@ class ExplainPipeline(
     private val retrievalClient: RetrievalClient
 ) : StudyBrain {
 
+    // Step 1 (retrieve, only if online) -> Step 2 (combine) -> Step 3 (generate, always local)
     override suspend fun explain(capture: StudyCapture, isOnline: Boolean): ExplanationResult {
-        Log.d(TAG, "explain requested for Capture ID=${capture.id}, isOnline=$isOnline")
-        val queryText = capture.extractedText.ifBlank { "General Topic" }
-
-        val onlineContext = if (isOnline) {
-            Log.d(TAG, "Fetching online web enrichment context...")
-            retrievalClient.fetchOnlineContext(queryText, "")
+        val retrievedContext = if (isOnline) {
+            retrievalClient.fetchOnlineContext(capture.extractedText, BuildConfig.OPENROUTER_API_KEY)
         } else {
-            Log.d(TAG, "Offline mode active, skipping online retrieval.")
             ""
         }
 
-        val explanation = llmEngine.generateResponse(queryText)
-        Log.i(TAG, "Explanation generated successfully (length=${explanation.length} chars).")
+        val prompt = buildString {
+            append("You are a patient tutor explaining to a student with limited internet access. ")
+            append("Explain simply, in plain language, in 3-4 sentences.\n\n")
+            append("Content: ${capture.extractedText}\n")
+            if (retrievedContext.isNotBlank()) {
+                append("\nAdditional current context you may use if relevant:\n$retrievedContext\n")
+            }
+        }
+        val explanation = llmEngine.generateResponse(prompt) // always runs, on-device, this is the guarantee
 
         return ExplanationResult(
             captureId = capture.id,
             finalExplanation = explanation,
-            usedOnlineContext = isOnline && onlineContext.isNotEmpty()
+            usedOnlineContext = retrievedContext.isNotBlank()
         )
     }
 
     override suspend fun answerFollowUp(capture: StudyCapture, explanation: String, question: String): String {
-        Log.d(TAG, "answerFollowUp called with question: '$question'")
-        val answer = llmEngine.generateResponse(question)
-        Log.i(TAG, "Follow-up answer generated (length=${answer.length} chars).")
-        return answer
+        val prompt = "Based on text: ${capture.extractedText} and explanation: $explanation\nAnswer question: $question"
+        return llmEngine.generateResponse(prompt)
     }
 
     override suspend fun generateQuiz(capture: StudyCapture): List<QuizQuestion> {
-        Log.d(TAG, "generateQuiz requested for Capture ID=${capture.id}")
         val quizGen = QuizGenerator(llmEngine)
-        val questions = quizGen.generateQuiz(capture)
-        Log.i(TAG, "Quiz generated: ${questions.size} questions.")
-        return questions
-    }
-
-    companion object {
-        private const val TAG = "ExplainPipeline"
+        return quizGen.generateQuiz(capture)
     }
 }
-
-

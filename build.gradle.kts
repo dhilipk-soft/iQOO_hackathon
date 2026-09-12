@@ -10,4 +10,3 @@ buildscript {
         classpath("com.google.devtools.ksp:symbol-processing-gradle-plugin:2.0.21-1.0.25")
     }
 }
-
