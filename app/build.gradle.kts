@@ -88,11 +88,8 @@ dependencies {
     implementation("androidx.room:room-ktx:2.6.1")
     implementation("androidx.work:work-runtime-ktx:2.9.0")
 
-    // On-device LLM — LiteRT-LM targets the phone's NPU directly (implementation-plan.md §3b).
-    // Pinned to a real published version (checked against Google's Maven metadata).
-    implementation("com.google.ai.edge.litertlm:litertlm-android:0.17.0")
-    // Previous engine, kept as a one-line rollback if this doesn't compile cleanly:
-    // implementation("com.google.mediapipe:tasks-genai:0.10.24")
+    // On-device LLM via MediaPipe Tasks GenAI (compatible with Kotlin 2.0.21)
+    implementation("com.google.mediapipe:tasks-genai:0.10.24")
 
     // Networking, for OpenRouter retrieval call
     implementation("com.squareup.retrofit2:retrofit:2.11.0")
