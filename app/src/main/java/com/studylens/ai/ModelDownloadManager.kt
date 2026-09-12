@@ -78,6 +78,32 @@ class ModelDownloadManager(private val context: Context) {
             .apply()
     }
 
+    /** Resets the active-model preference back to the built-in default - used after deleting
+     * whichever model was active, so the app doesn't keep pointing at a filename that no
+     * longer exists on disk. Call llmEngine.invalidate() right after this too. */
+    fun clearActiveModel() {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_ACTIVE_FILENAME, DEFAULT_MODEL_FILENAME)
+            .putString(KEY_ACTIVE_DISPLAY_NAME, DEFAULT_MODEL_DISPLAY_NAME)
+            .apply()
+    }
+
+    fun isActiveModel(model: DownloadableModel): Boolean {
+        return getActiveModelFilename(context) == model.filename
+    }
+
+    /** Deletes the downloaded file to free up storage (these are multi-GB files). If it was
+     * the active model, falls back to the default preference so LlmEngine doesn't keep
+     * pointing at a now-missing file - the caller should still call llmEngine.invalidate()
+     * to drop any in-memory engine/conversation still holding the deleted file open. */
+    fun deleteDownloadedModel(model: DownloadableModel) {
+        File(context.filesDir, model.filename).delete()
+        if (isActiveModel(model)) {
+            clearActiveModel()
+        }
+    }
+
     companion object {
         private const val PREFS_NAME = "studylens_model_prefs"
         private const val KEY_ACTIVE_FILENAME = "active_model_filename"

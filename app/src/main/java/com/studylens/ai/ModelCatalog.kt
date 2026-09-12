@@ -17,7 +17,17 @@ data class DownloadableModel(
     val sizeBytes: Long,
     val downloadUrl: String,
     val available: Boolean,
-    val isMultimodal: Boolean
+    // Confirmed (not guessed) via real on-device errors that this file's format can't load
+    // in litertlm-android's Engine API at all - e.g. .task files failing with "Unable to
+    // open zip archive" or "TF_LITE_VISION_ENCODER not found". Distinct from `available`
+    // (which is about hosting/URLs): a model can be fully hosted and downloaded and STILL be
+    // knownIncompatible, in which case the picker must never offer to switch to it, even if
+    // the file is already sitting on disk from earlier testing.
+    val knownIncompatible: Boolean = false,
+    // Drives whether the chat UI offers image upload for the active model - text-only
+    // models (none currently in the catalog, but the field stays for when one works) should
+    // hide that entry point rather than let the user attach a photo the model can't read.
+    val isMultimodal: Boolean = true
 )
 
 object ModelCatalog {
@@ -40,6 +50,7 @@ object ModelCatalog {
                     sizeBytes = o.getLong("sizeBytes"),
                     downloadUrl = url,
                     available = !url.contains(PLACEHOLDER_MARKER, ignoreCase = true),
+                    knownIncompatible = o.optBoolean("knownIncompatible", false),
                     isMultimodal = o.optBoolean("isMultimodal", true)
                 )
             }
