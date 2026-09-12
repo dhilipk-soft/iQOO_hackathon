@@ -15,11 +15,18 @@ interface OpenRouterApi {
     ): Map<String, Any>
 }
 
+data class WebCitation(val title: String, val url: String)
+
+data class RetrievalResult(
+    val factsText: String,
+    val citations: List<WebCitation> = emptyList()
+)
+
 /**
  * Retrieval step of the RAG pipeline (implementation-plan.md §3a) — only called when
  * NetworkHealthChecker says isOnline. Asks for short FACTS, not a finished explanation;
  * the local model in LlmEngine always does the actual explaining. Any failure or slow
- * response just yields an empty string — the caller then proceeds offline-only.
+ * response just yields an empty result — the caller then proceeds offline-only.
  */
 class RetrievalClient {
     private val retrofit = Retrofit.Builder()
@@ -29,14 +36,15 @@ class RetrievalClient {
 
     private val api = retrofit.create(OpenRouterApi::class.java)
 
-    suspend fun fetchOnlineContext(topic: String, apiKey: String): String {
-        if (apiKey.isBlank()) return ""
+    suspend fun fetchOnlineContext(topic: String, apiKey: String): RetrievalResult {
+        if (apiKey.isBlank()) return RetrievalResult("")
         return try {
-            withTimeoutOrNull(6000L) {
+            withTimeoutOrNull(8000L) {
                 val response = api.queryOnlineContext(
                     apiKey = "Bearer $apiKey",
                     request = mapOf(
-                        "model" to "perplexity/sonar:online",
+                        "model" to "perplexity/sonar", // already web-connected, no ":online" suffix needed
+                        "max_tokens" to 300, // required - omitting this defaults to the model max and errors on limited credits
                         "messages" to listOf(
                             mapOf(
                                 "role" to "system",
@@ -47,17 +55,27 @@ class RetrievalClient {
                         )
                     )
                 )
-                extractContent(response)
-            }.orEmpty()
+                extractResult(response)
+            } ?: RetrievalResult("")
         } catch (e: Exception) {
-            "" // retrieval failed or timed out — fine, generation still runs locally without it
+            RetrievalResult("") // retrieval failed or timed out - fine, generation still runs locally without it
         }
     }
 
     @Suppress("UNCHECKED_CAST")
-    private fun extractContent(response: Map<String, Any>): String {
-        val choices = response["choices"] as? List<Map<String, Any>> ?: return ""
-        val message = choices.firstOrNull()?.get("message") as? Map<String, Any> ?: return ""
-        return message["content"] as? String ?: ""
+    private fun extractResult(response: Map<String, Any>): RetrievalResult {
+        val choices = response["choices"] as? List<Map<String, Any>> ?: return RetrievalResult("")
+        val message = choices.firstOrNull()?.get("message") as? Map<String, Any> ?: return RetrievalResult("")
+        val content = message["content"] as? String ?: ""
+
+        val annotations = message["annotations"] as? List<Map<String, Any>> ?: emptyList()
+        val citations = annotations.mapNotNull { annotation ->
+            val urlCitation = annotation["url_citation"] as? Map<String, Any> ?: return@mapNotNull null
+            val url = urlCitation["url"] as? String ?: return@mapNotNull null
+            val title = (urlCitation["title"] as? String)?.takeIf { it.isNotBlank() } ?: url
+            WebCitation(title, url)
+        }.distinctBy { it.url }
+
+        return RetrievalResult(content, citations)
     }
 }

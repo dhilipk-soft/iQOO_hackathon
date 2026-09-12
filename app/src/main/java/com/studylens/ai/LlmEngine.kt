@@ -31,7 +31,10 @@ class LlmEngine(private val context: Context) {
             llmInference?.let { return it }
             val options = LlmInference.LlmInferenceOptions.builder()
                 .setModelPath(modelFile.absolutePath)
-                .setMaxTokens(512)
+                // 512 was too tight - it bounds prompt+response combined, so once a prompt
+                // included prior context (follow-ups, retrieved facts) there was barely any
+                // room left for the actual answer, causing short/truncated/degenerate output.
+                .setMaxTokens(1536)
                 .setPreferredBackend(LlmInference.Backend.GPU) // explicit hardware acceleration
                 .build()
             val inference = LlmInference.createFromOptions(context, options)

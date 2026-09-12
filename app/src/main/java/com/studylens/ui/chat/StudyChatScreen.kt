@@ -10,6 +10,7 @@ import android.graphics.Matrix
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -132,11 +133,13 @@ fun StudyChatScreen(
                         val extracted = textExtractor.extractText(correctedBitmap)
                         withContext(Dispatchers.Main) {
                             isProcessingOcr = false
-                            if (extracted.isNotBlank()) {
-                                inputText = extracted
-                            } else {
-                                inputText = "3.2 Quadratic Equations\nax² + bx + c = 0, where a ≠ 0\nFind the roots using quadratic formula: x = (-b ± √(b² - 4ac)) / 2a"
+                            // Send the extracted text straight to the AI - it's the prompt,
+                            // not something to dump into the visible chat box.
+                            val toSend = extracted.ifBlank {
+                                "3.2 Quadratic Equations\nax² + bx + c = 0, where a ≠ 0\nFind the roots using quadratic formula: x = (-b ± √(b² - 4ac)) / 2a"
                             }
+                            onAskQuestion(toSend)
+                            attachedImageUri = null
                         }
                     } else {
                         withContext(Dispatchers.Main) {
@@ -186,11 +189,13 @@ fun StudyChatScreen(
                         val extracted = textExtractor.extractText(bitmap)
                         withContext(Dispatchers.Main) {
                             isProcessingOcr = false
-                            if (extracted.isNotBlank()) {
-                                inputText = extracted
-                            } else {
-                                inputText = "Calculus: Integration by Parts\nFormula: ∫ u dv = uv - ∫ v du"
+                            // Send the extracted text straight to the AI - it's the prompt,
+                            // not something to dump into the visible chat box.
+                            val toSend = extracted.ifBlank {
+                                "Calculus: Integration by Parts\nFormula: ∫ u dv = uv - ∫ v du"
                             }
+                            onAskQuestion(toSend)
+                            attachedImageUri = null
                         }
                     } else {
                         withContext(Dispatchers.Main) {
@@ -216,6 +221,11 @@ fun StudyChatScreen(
             cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
         }
     }
+    // Back from an active chat returns to the empty home canvas, rather than leaving the screen.
+    BackHandler(enabled = activeSession != null) {
+        onStartNewSession()
+    }
+
     // Auto-scroll when new message arrives
     LaunchedEffect(followUpList.size, isExplaining, isAnsweringFollowUp) {
         if (followUpList.isNotEmpty() || isAnsweringFollowUp) {
@@ -586,6 +596,7 @@ fun StudyChatScreen(
                                 explanation = explanationResult?.finalExplanation ?: activeSession?.explanation ?: "",
                                 formula = activeSession?.formula,
                                 bulletPoints = activeSession?.bulletPoints ?: emptyList(),
+                                usedOnlineContext = explanationResult?.usedOnlineContext ?: activeSession?.usedOnlineContext ?: false,
                                 isSpeaking = isSpeaking,
                                 onSpeak = { onSpeakText(explanationResult?.finalExplanation ?: activeSession?.explanation ?: "") },
                                 onStopSpeak = onStopSpeaking,
@@ -899,6 +910,7 @@ fun StudyExplanationCard(
     explanation: String,
     formula: String?,
     bulletPoints: List<String>,
+    usedOnlineContext: Boolean,
     isSpeaking: Boolean,
     onSpeak: () -> Unit,
     onStopSpeak: () -> Unit,
@@ -920,13 +932,14 @@ fun StudyExplanationCard(
         shadowElevation = 2.dp
     ) {
         Column(modifier = Modifier.padding(18.dp)) {
-            // Card Top Offline Badge (Screen 3)
+            // Card Top Badge - reflects the real result, not a hardcoded label (Screen 3)
             Surface(
                 shape = RoundedCornerShape(12.dp),
-                color = Color(0xFFECFDF5),
+                color = if (usedOnlineContext) Color(0xFFEEF2FF) else Color(0xFFECFDF5),
                 border = ButtonDefaults.outlinedButtonBorder.copy(
                     brush = Brush.horizontalGradient(
-                        listOf(Color(0xFFA7F3D0), Color(0xFF6EE7B7))
+                        if (usedOnlineContext) listOf(Color(0xFFC7D2FE), Color(0xFFA5B4FC))
+                        else listOf(Color(0xFFA7F3D0), Color(0xFF6EE7B7))
                     ),
                     width = 1.dp
                 )
@@ -936,8 +949,8 @@ fun StudyExplanationCard(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "📴 Offline answer",
-                        color = Color(0xFF059669),
+                        text = if (usedOnlineContext) "📡 Enhanced with live info" else "📴 Offline answer",
+                        color = if (usedOnlineContext) Color(0xFF4F46E5) else Color(0xFF059669),
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold
                     )
@@ -1135,14 +1148,17 @@ fun FollowUpCard(
             Column(modifier = Modifier.padding(16.dp)) {
                 Surface(
                     shape = RoundedCornerShape(10.dp),
-                    color = Color(0xFFECFDF5),
+                    color = if (message.usedOnlineContext) Color(0xFFEEF2FF) else Color(0xFFECFDF5),
                     border = ButtonDefaults.outlinedButtonBorder.copy(
-                        brush = Brush.horizontalGradient(listOf(Color(0xFFA7F3D0), Color(0xFF6EE7B7)))
+                        brush = Brush.horizontalGradient(
+                            if (message.usedOnlineContext) listOf(Color(0xFFC7D2FE), Color(0xFFA5B4FC))
+                            else listOf(Color(0xFFA7F3D0), Color(0xFF6EE7B7))
+                        )
                     )
                 ) {
                     Text(
-                        text = "📴 Offline answer",
-                        color = Color(0xFF059669),
+                        text = if (message.usedOnlineContext) "📡 Enhanced with live info" else "📴 Offline answer",
+                        color = if (message.usedOnlineContext) Color(0xFF4F46E5) else Color(0xFF059669),
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)

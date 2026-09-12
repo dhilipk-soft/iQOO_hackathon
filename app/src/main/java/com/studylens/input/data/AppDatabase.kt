@@ -10,6 +10,8 @@ import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.TypeConverter
+import androidx.room.TypeConverters
 import com.studylens.shared.AppEvent
 import com.studylens.shared.NotificationEvent
 import com.studylens.shared.StudyCapture
@@ -67,6 +69,53 @@ data class StudySessionEntity(
     )
 }
 
+// Chat persistence — real conversation history (ChatGPT-style), replacing the old
+// in-memory-only seeded sessions.
+@Entity(tableName = "chat_sessions")
+data class ChatSessionEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val title: String,
+    val subject: String,
+    val previewText: String,
+    val explanation: String,
+    val formula: String?,
+    val bulletPoints: List<String>,
+    val usedOnlineContext: Boolean,
+    val timestamp: Long
+)
+
+@Entity(tableName = "chat_messages")
+data class ChatMessageEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val sessionId: Long,
+    val question: String,
+    val answer: String,
+    val timestamp: Long
+)
+
+class Converters {
+    @TypeConverter
+    fun fromStringList(list: List<String>): String = list.joinToString("|||")
+
+    @TypeConverter
+    fun toStringList(data: String): List<String> = if (data.isBlank()) emptyList() else data.split("|||")
+}
+
+@Dao
+interface ChatDao {
+    @Insert
+    suspend fun insertSession(session: ChatSessionEntity): Long
+
+    @Query("SELECT * FROM chat_sessions ORDER BY timestamp DESC")
+    fun getAllSessions(): Flow<List<ChatSessionEntity>>
+
+    @Insert
+    suspend fun insertMessage(message: ChatMessageEntity): Long
+
+    @Query("SELECT * FROM chat_messages WHERE sessionId = :sessionId ORDER BY timestamp ASC")
+    suspend fun getMessagesForSession(sessionId: Long): List<ChatMessageEntity>
+}
+
 // ----------------------------------------------------
 // DAOs
 // ----------------------------------------------------
@@ -116,14 +165,18 @@ interface FocusSignalsDao {
         StudyCaptureEntity::class,
         AppEventEntity::class,
         NotificationEventEntity::class,
-        StudySessionEntity::class
+        StudySessionEntity::class,
+        ChatSessionEntity::class,
+        ChatMessageEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
+@TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun studyCaptureDao(): StudyCaptureDao
     abstract fun focusSignalsDao(): FocusSignalsDao
+    abstract fun chatDao(): ChatDao
 
     companion object {
         @Volatile

@@ -6,6 +6,9 @@ import androidx.lifecycle.viewModelScope
 import com.studylens.ai.ExplainPipeline
 import com.studylens.ai.LlmEngine
 import com.studylens.ai.RetrievalClient
+import com.studylens.input.data.AppDatabase
+import com.studylens.input.data.ChatMessageEntity
+import com.studylens.input.data.ChatSessionEntity
 import com.studylens.input.network.NetworkHealthChecker
 import com.studylens.input.vitals.DeviceVitalsMonitor
 import com.studylens.shared.ExplanationResult
@@ -24,6 +27,7 @@ data class FollowUpMessage(
     val id: String,
     val question: String,
     val answer: String,
+    val usedOnlineContext: Boolean = false,
     val timestamp: Long = System.currentTimeMillis()
 )
 
@@ -35,8 +39,12 @@ data class StudyTopicSession(
     val explanation: String,
     val formula: String? = null,
     val bulletPoints: List<String> = emptyList(),
+    val usedOnlineContext: Boolean = false,
     val followUps: List<FollowUpMessage> = emptyList()
 )
+
+private const val SESSION_ID_PREFIX = "session_"
+private fun StudyTopicSession.dbId(): Long? = id.removePrefix(SESSION_ID_PREFIX).toLongOrNull()
 
 class StudyViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -48,21 +56,19 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
     private val retrievalClient = RetrievalClient()
     private val explainPipeline = ExplainPipeline(llmEngine, retrievalClient)
 
+    private val chatDao = AppDatabase.getDatabase(application).chatDao()
+
     // Observable states
     private val _isOnline = MutableStateFlow(true)
     val isOnline: StateFlow<Boolean> = _isOnline.asStateFlow()
 
     private val _vitals = MutableStateFlow(
-        InferenceStats(
-            tokensPerSecond = 28.4,
-            latencyMs = 95,
-            ramUsedMb = 312,
-            thermalStatus = "NORMAL"
-        )
+        InferenceStats(tokensPerSecond = 0.0, latencyMs = 0, ramUsedMb = 0, thermalStatus = "NORMAL")
     )
     val vitals: StateFlow<InferenceStats> = _vitals.asStateFlow()
 
-    private val _capturedText = MutableStateFlow("Calculus: Integration by Parts\nFormula: ∫ u dv = uv - ∫ v du\nUsed when integrating the product of two functions.")
+    // Starts empty - filled only by what the user actually captures/types (no demo seed text).
+    private val _capturedText = MutableStateFlow("")
     val capturedText: StateFlow<String> = _capturedText.asStateFlow()
 
     private val _isExplaining = MutableStateFlow(false)
@@ -77,128 +83,25 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
     private val _isAnsweringFollowUp = MutableStateFlow(false)
     val isAnsweringFollowUp: StateFlow<Boolean> = _isAnsweringFollowUp.asStateFlow()
 
-    private val defaultSessions = listOf(
-        StudyTopicSession(
-            id = "session_quadratic",
-            title = "Quadratic Equation",
-            subject = "Algebra",
-            previewText = "x = (-b ± √(b² - 4ac)) / 2a",
-            explanation = """
-                A quadratic equation is a second degree polynomial equation of the form ax² + bx + c = 0, where a ≠ 0. It has at most two solutions.
-                The solutions can be found using the quadratic formula:
-            """.trimIndent(),
-            formula = "x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}",
-            bulletPoints = listOf(
-                "• a, b, c are constants",
-                "• b² - 4ac is called the discriminant",
-                "• It determines the nature of the roots"
-            ),
-            followUps = listOf(
-                FollowUpMessage(
-                    id = "fu_1",
-                    question = "What does the discriminant tell us?",
-                    answer = "The discriminant is the value b² - 4ac.\n\n• If b² - 4ac > 0: two real and distinct roots.\n• If b² - 4ac = 0: one real root (both roots are equal).\n• If b² - 4ac < 0: no real roots (complex roots)."
-                )
-            )
-        ),
-        StudyTopicSession(
-            id = "session_calculus",
-            title = "Calculus: Integration by Parts",
-            subject = "Calculus",
-            previewText = "∫ u dv = uv - ∫ v du",
-            explanation = "Integration by parts is derived from the product rule of calculus. By integrating both sides and rearranging, we obtain the formula:",
-            formula = "\\int u\\,dv = uv - \\int v\\,du",
-            bulletPoints = listOf(
-                "• Used when integrating products of two functions",
-                "• Choose 'u' using LIATE priority rule (Log, Inverse trig, Algebraic, Trig, Exp)",
-                "• Differentiate u to get du, integrate dv to get v"
-            ),
-            followUps = emptyList()
-        ),
-        StudyTopicSession(
-            id = "session_newton",
-            title = "Newton's Third Law",
-            subject = "Physics",
-            previewText = "F_AB = -F_BA",
-            explanation = "Whenever one body exerts a force on a second body, the second body exerts an equal and opposite force on the first.",
-            formula = "F_{AB} = -F_{BA}",
-            bulletPoints = listOf(
-                "• Forces always occur in matched pairs",
-                "• Action and reaction forces act on different bodies",
-                "• Magnitude is equal, direction is opposite"
-            ),
-            followUps = emptyList()
-        )
-    )
-
-    private val _sessionHistory = MutableStateFlow<List<StudyTopicSession>>(defaultSessions)
+    // Real chat history, loaded from Room - starts empty, grows as the user actually studies
+    // (this is what "remembers previous chats like ChatGPT" means: persisted, not seeded).
+    private val _sessionHistory = MutableStateFlow<List<StudyTopicSession>>(emptyList())
     val sessionHistory: StateFlow<List<StudyTopicSession>> = _sessionHistory.asStateFlow()
 
-    private val _activeSession = MutableStateFlow<StudyTopicSession?>(defaultSessions.first())
+    // No chat is open by default - the user lands on the empty canvas, not a pre-filled example.
+    private val _activeSession = MutableStateFlow<StudyTopicSession?>(null)
     val activeSession: StateFlow<StudyTopicSession?> = _activeSession.asStateFlow()
 
-    private val _quizQuestions = MutableStateFlow<List<QuizQuestion>>(
-        listOf(
-            QuizQuestion(
-                id = 1L,
-                captureId = 101L,
-                topic = "General form of quadratic equation",
-                question = "What is the general form of a quadratic equation?",
-                options = listOf("ax + b = 0", "ax² + bx + c = 0", "ax³ + bx² + c = 0", "a/x + b = 0"),
-                correctAnswer = "ax² + bx + c = 0"
-            ),
-            QuizQuestion(
-                id = 2L,
-                captureId = 101L,
-                topic = "Meaning of discriminant",
-                question = "What is the formula for the discriminant of ax² + bx + c = 0?",
-                options = listOf("b² - 4ac", "2a / b", "√(a² + b²)", "c / a"),
-                correctAnswer = "b² - 4ac"
-            ),
-            QuizQuestion(
-                id = 3L,
-                captureId = 101L,
-                topic = "Number of roots",
-                question = "If the discriminant b² - 4ac > 0, how many real roots exist?",
-                options = listOf("Two real and distinct roots", "No real roots", "One repeated root", "Infinite roots"),
-                correctAnswer = "Two real and distinct roots"
-            )
-        )
-    )
+    private val _quizQuestions = MutableStateFlow<List<QuizQuestion>>(emptyList())
     val quizQuestions: StateFlow<List<QuizQuestion>> = _quizQuestions.asStateFlow()
 
-    private val _selectedQuizAnswers = MutableStateFlow<Map<Long, String>>(
-        mapOf(
-            1L to "ax² + bx + c = 0",
-            2L to "2a / b", // Intentionally wrong to show 2/3 correct like in Image 1!
-            3L to "Two real and distinct roots"
-        )
-    )
+    private val _selectedQuizAnswers = MutableStateFlow<Map<Long, String>>(emptyMap())
     val selectedQuizAnswers: StateFlow<Map<Long, String>> = _selectedQuizAnswers.asStateFlow()
 
     private val _quizSubmitted = MutableStateFlow(false)
     val quizSubmitted: StateFlow<Boolean> = _quizSubmitted.asStateFlow()
 
-    private val _revisionList = MutableStateFlow<List<QuizQuestion>>(
-        listOf(
-            QuizQuestion(
-                id = 2L,
-                captureId = 101L,
-                topic = "Discriminant",
-                question = "Meaning of discriminant in quadratic equations",
-                options = listOf("b² - 4ac", "2a / b", "√(a² + b²)", "c / a"),
-                correctAnswer = "b² - 4ac"
-            ),
-            QuizQuestion(
-                id = 4L,
-                captureId = 101L,
-                topic = "Nature of Roots",
-                question = "How the discriminant determines real vs complex roots",
-                options = listOf("b² - 4ac > 0 gives two real roots", "b² - 4ac = 0 gives complex roots"),
-                correctAnswer = "b² - 4ac > 0 gives two real roots"
-            )
-        )
-    )
+    private val _revisionList = MutableStateFlow<List<QuizQuestion>>(emptyList())
     val revisionList: StateFlow<List<QuizQuestion>> = _revisionList.asStateFlow()
 
     private val _focusInsight = MutableStateFlow(
@@ -238,7 +141,27 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
+
+        // Load real chat history from Room - this is the persistence layer (ChatGPT-style).
+        // Any insert elsewhere (explainCurrentCapture) makes this Flow re-emit automatically.
+        viewModelScope.launch {
+            chatDao.getAllSessions().collect { entities ->
+                _sessionHistory.value = entities.map { it.toDomain() }
+            }
+        }
     }
+
+    private fun ChatSessionEntity.toDomain(): StudyTopicSession = StudyTopicSession(
+        id = "$SESSION_ID_PREFIX$id",
+        title = title,
+        subject = subject,
+        previewText = previewText,
+        explanation = explanation,
+        formula = formula,
+        bulletPoints = bulletPoints,
+        usedOnlineContext = usedOnlineContext,
+        followUps = emptyList() // loaded on-demand in selectSession()
+    )
 
     private fun deriveTopicDetails(rawText: String): Triple<String, String, String?> {
         val lower = rawText.lowercase()
@@ -261,16 +184,24 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun selectSession(sessionId: String) {
-        val found = _sessionHistory.value.find { it.id == sessionId }
-        if (found != null) {
-            _activeSession.value = found
-            _capturedText.value = found.previewText
-            _explanationResult.value = ExplanationResult(
-                captureId = System.currentTimeMillis(),
-                finalExplanation = found.explanation,
-                usedOnlineContext = false
-            )
-            _followUpList.value = found.followUps
+        val found = _sessionHistory.value.find { it.id == sessionId } ?: return
+        _activeSession.value = found
+        _capturedText.value = found.previewText
+        _explanationResult.value = ExplanationResult(
+            captureId = found.dbId() ?: System.currentTimeMillis(),
+            finalExplanation = found.explanation,
+            usedOnlineContext = found.usedOnlineContext
+        )
+        // Load this session's real follow-up thread from Room.
+        viewModelScope.launch {
+            val dbId = found.dbId()
+            _followUpList.value = if (dbId != null) {
+                chatDao.getMessagesForSession(dbId).map { m ->
+                    FollowUpMessage(id = m.id.toString(), question = m.question, answer = m.answer, timestamp = m.timestamp)
+                }
+            } else {
+                emptyList()
+            }
         }
     }
 
@@ -313,23 +244,38 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
             )
 
             val (topicTitle, topicSubject, topicFormula) = deriveTopicDetails(textToProcess)
-            val newSession = StudyTopicSession(
-                id = "session_$startTime",
+            val bulletPoints = listOf(
+                "• Key topic: $topicTitle",
+                "• Evaluated on-device by StudyLens AI",
+                if (result.usedOnlineContext) "• Enhanced with real-time web context" else "• Processed 100% offline on-device"
+            )
+
+            // Persist to Room - this is the real "remembers previous chats" storage.
+            // The sessionHistory Flow (collected in init) picks this up automatically.
+            val dbId = chatDao.insertSession(
+                ChatSessionEntity(
+                    title = topicTitle,
+                    subject = topicSubject,
+                    previewText = textToProcess,
+                    explanation = result.finalExplanation,
+                    formula = topicFormula,
+                    bulletPoints = bulletPoints,
+                    usedOnlineContext = result.usedOnlineContext,
+                    timestamp = startTime
+                )
+            )
+
+            _activeSession.value = StudyTopicSession(
+                id = "$SESSION_ID_PREFIX$dbId",
                 title = topicTitle,
                 subject = topicSubject,
                 previewText = textToProcess,
                 explanation = result.finalExplanation,
                 formula = topicFormula,
-                bulletPoints = listOf(
-                    "• Key topic: $topicTitle",
-                    "• Evaluated on-device by StudyLens AI",
-                    if (online) "• Enhanced with real-time web context" else "• Processed 100% offline on-device"
-                ),
+                bulletPoints = bulletPoints,
+                usedOnlineContext = result.usedOnlineContext,
                 followUps = emptyList()
             )
-            _sessionHistory.value = listOf(newSession) + _sessionHistory.value.filter { it.id != newSession.id }
-            _activeSession.value = newSession
-
             _explanationResult.value = result
             _isExplaining.value = false
         }
@@ -341,24 +287,49 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
 
         viewModelScope.launch {
             val startTime = System.currentTimeMillis()
+            val online = _isOnline.value
             val capture = StudyCapture(
                 id = _explanationResult.value?.captureId ?: startTime,
                 extractedText = _capturedText.value,
                 timestamp = startTime
             )
-            val currentExplanation = _explanationResult.value?.finalExplanation
-                ?: _activeSession.value?.explanation
-                ?: ""
 
-            val answerText = explainPipeline.answerFollowUp(capture, currentExplanation, question)
+            // Build the full running transcript (original explanation + every prior Q&A) so
+            // the model has real context - without this, a second follow-up like "what is
+            // component" has no idea it's still talking about React from the first question.
+            val conversationContext = buildString {
+                append("Topic explanation: ")
+                append(_explanationResult.value?.finalExplanation ?: _activeSession.value?.explanation ?: "")
+                append("\n")
+                _followUpList.value.forEach { fu ->
+                    append("Q: ${fu.question}\nA: ${fu.answer}\n")
+                }
+            }
+
+            val result = explainPipeline.answerFollowUp(capture, conversationContext, question, online)
 
             val latency = System.currentTimeMillis() - startTime
             _vitals.value = _vitals.value.copy(latencyMs = latency)
 
+            // Persist under the active session so it survives app restarts, same as the
+            // explanation itself.
+            val sessionDbId = _activeSession.value?.dbId()
+            if (sessionDbId != null) {
+                chatDao.insertMessage(
+                    ChatMessageEntity(
+                        sessionId = sessionDbId,
+                        question = question,
+                        answer = result.finalExplanation,
+                        timestamp = startTime
+                    )
+                )
+            }
+
             val newMessage = FollowUpMessage(
                 id = System.currentTimeMillis().toString(),
                 question = question,
-                answer = answerText
+                answer = result.finalExplanation,
+                usedOnlineContext = result.usedOnlineContext
             )
             _followUpList.value = _followUpList.value + newMessage
             _isAnsweringFollowUp.value = false
