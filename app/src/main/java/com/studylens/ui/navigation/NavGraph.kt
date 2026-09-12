@@ -1,5 +1,6 @@
 package com.studylens.ui.navigation
 
+import android.util.Log
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -211,8 +212,11 @@ fun NavGraph(
             startDestination = Screen.Home.route,
             modifier = Modifier.padding(innerPadding)
         ) {
-            // 1. Welcome / Home Screen (Image 1 Screen 1)
+            // 1. Welcome / Home Screen
             composable(Screen.Home.route) {
+                LaunchedEffect(Unit) {
+                    Log.d("NavGraph", "Navigated to Screen.Home")
+                }
                 HomeScreen(
                     onGetStarted = {
                         navController.navigate(Screen.StudyChat.route)
@@ -220,8 +224,11 @@ fun NavGraph(
                 )
             }
 
-            // 2. ChatGPT-Style Study Chat Screen (Image 1 Screen 3 & 4 + Image 2)
+            // 2. Study Chat Screen
             composable(Screen.StudyChat.route) {
+                LaunchedEffect(Unit) {
+                    Log.d("NavGraph", "Navigated to Screen.StudyChat")
+                }
                 StudyChatScreen(
                     activeSession = activeSession,
                     sessionHistory = sessionHistory,
@@ -261,8 +268,11 @@ fun NavGraph(
                 )
             }
 
-            // 3. Quiz Screen (Image 1 Screen 5)
+            // 3. Quiz Screen
             composable(Screen.Quiz.route) {
+                LaunchedEffect(Unit) {
+                    Log.d("NavGraph", "Navigated to Screen.Quiz")
+                }
                 QuizScreen(
                     questions = quizQuestions,
                     selectedAnswers = selectedQuizAnswers,
@@ -276,8 +286,11 @@ fun NavGraph(
                 )
             }
 
-            // 4. Quiz Result Screen (Image 1 Screen 6)
+            // 4. Quiz Result Screen
             composable(Screen.QuizResult.route) {
+                LaunchedEffect(Unit) {
+                    Log.d("NavGraph", "Navigated to Screen.QuizResult")
+                }
                 QuizResultScreen(
                     questions = quizQuestions,
                     selectedAnswers = selectedQuizAnswers,
@@ -292,8 +305,11 @@ fun NavGraph(
                 )
             }
 
-            // 5. Revision List Screen (Image 1 Screen 7)
+            // 5. Revision List Screen
             composable(Screen.Revision.route) {
+                LaunchedEffect(Unit) {
+                    Log.d("NavGraph", "Navigated to Screen.Revision")
+                }
                 RevisionScreen(
                     revisionList = revisionList,
                     onRestudyTopic = { item ->
@@ -304,16 +320,22 @@ fun NavGraph(
                 )
             }
 
-            // 6. Focus Insights Screen (Image 1 Screen 8)
+            // 6. Focus Insights Screen
             composable(Screen.Focus.route) {
+                LaunchedEffect(Unit) {
+                    Log.d("NavGraph", "Navigated to Screen.Focus")
+                }
                 FocusScreen(
                     session = studySession,
                     focusInsight = focusInsight
                 )
             }
 
-            // 7. Settings Screen (Image 1 Screen 9)
+            // 7. Settings Screen
             composable(Screen.Settings.route) {
+                LaunchedEffect(Unit) {
+                    Log.d("NavGraph", "Navigated to Screen.Settings")
+                }
                 SettingsScreen()
             }
         }
