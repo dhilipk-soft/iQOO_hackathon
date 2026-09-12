@@ -1,5 +1,6 @@
 package com.studylens.ai
 
+import com.studylens.BuildConfig
 import com.studylens.shared.ExplanationResult
 import com.studylens.shared.QuizQuestion
 import com.studylens.shared.StudyBrain
@@ -10,19 +11,28 @@ class ExplainPipeline(
     private val retrievalClient: RetrievalClient
 ) : StudyBrain {
 
+    // Step 1 (retrieve, only if online) -> Step 2 (combine) -> Step 3 (generate, always local)
     override suspend fun explain(capture: StudyCapture, isOnline: Boolean): ExplanationResult {
-        val onlineContext = if (isOnline) {
-            retrievalClient.fetchOnlineContext(capture.extractedText, "")
+        val retrievedContext = if (isOnline) {
+            retrievalClient.fetchOnlineContext(capture.extractedText, BuildConfig.OPENROUTER_API_KEY)
         } else {
             ""
         }
-        val prompt = "Explain the following concept succinctly:\nText: ${capture.extractedText}\nContext: $onlineContext"
-        val explanation = llmEngine.generateResponse(prompt)
+
+        val prompt = buildString {
+            append("You are a patient tutor explaining to a student with limited internet access. ")
+            append("Explain simply, in plain language, in 3-4 sentences.\n\n")
+            append("Content: ${capture.extractedText}\n")
+            if (retrievedContext.isNotBlank()) {
+                append("\nAdditional current context you may use if relevant:\n$retrievedContext\n")
+            }
+        }
+        val explanation = llmEngine.generateResponse(prompt) // always runs, on-device, this is the guarantee
 
         return ExplanationResult(
             captureId = capture.id,
             finalExplanation = explanation,
-            usedOnlineContext = isOnline && onlineContext.isNotEmpty()
+            usedOnlineContext = retrievedContext.isNotBlank()
         )
     }
 
