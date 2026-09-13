@@ -158,7 +158,11 @@ data class ChatMessageEntity(
     val question: String,
     val answer: String,
     val timestamp: Long,
+<<<<<<< HEAD
     val imagePath: String? = null  // Path to uploaded image for this follow-up message
+=======
+    val usedOnlineContext: Boolean = false
+>>>>>>> 6151f416595a7c84b23fc5a115b4ff341926ae5c
 )
 
 private fun List<String>.toDbString(): String = joinToString("|||")
@@ -222,8 +226,13 @@ class DbHelper(context: Context) : SQLiteOpenHelper(context, "studylens_db", nul
                 sessionId INTEGER NOT NULL,
                 question TEXT NOT NULL,
                 answer TEXT NOT NULL,
+<<<<<<< HEAD
                 timestamp INTEGER NOT NULL,
                 imagePath TEXT
+=======
+                usedOnlineContext INTEGER NOT NULL DEFAULT 0,
+                timestamp INTEGER NOT NULL
+>>>>>>> 6151f416595a7c84b23fc5a115b4ff341926ae5c
             )"""
         )
         db.execSQL(
@@ -308,9 +317,15 @@ class DbHelper(context: Context) : SQLiteOpenHelper(context, "studylens_db", nul
                 actionPlan TEXT NOT NULL DEFAULT ''
             )"""
         )
+<<<<<<< HEAD
         // Safe migration: add imagePath columns if they don't exist (for existing installs)
         try { db.execSQL("ALTER TABLE chat_sessions ADD COLUMN imagePath TEXT") } catch (_: Exception) {}
         try { db.execSQL("ALTER TABLE chat_messages ADD COLUMN imagePath TEXT") } catch (_: Exception) {}
+=======
+        try {
+            db.execSQL("ALTER TABLE chat_messages ADD COLUMN usedOnlineContext INTEGER NOT NULL DEFAULT 0;")
+        } catch (_: Exception) {}
+>>>>>>> 6151f416595a7c84b23fc5a115b4ff341926ae5c
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -692,6 +707,62 @@ class ChatDao(private val helper: DbHelper) {
         return id
     }
 
+    suspend fun updateSession(session: ChatSessionEntity) = withContext(Dispatchers.IO) {
+        val values = ContentValues().apply {
+            put("title", session.title)
+            put("subject", session.subject)
+            put("previewText", session.previewText)
+            put("explanation", session.explanation)
+            put("formula", session.formula)
+            put("bulletPoints", session.bulletPoints.toDbString())
+            put("usedOnlineContext", if (session.usedOnlineContext) 1 else 0)
+            put("timestamp", session.timestamp)
+        }
+        helper.writableDatabase.update("chat_sessions", values, "id = ?", arrayOf(session.id.toString()))
+        refreshSessions()
+    }
+
+    suspend fun getUnenrichedSessions(): List<ChatSessionEntity> = withContext(Dispatchers.IO) {
+        getSessionsNeedingEnrichment()
+    }
+
+    suspend fun getSessionsNeedingEnrichment(): List<ChatSessionEntity> = withContext(Dispatchers.IO) {
+        val results = mutableListOf<ChatSessionEntity>()
+        val query = """
+            SELECT DISTINCT s.id, s.title, s.subject, s.previewText, s.explanation, s.formula, s.bulletPoints, s.usedOnlineContext, s.timestamp
+            FROM chat_sessions s
+            LEFT JOIN chat_messages m ON s.id = m.sessionId
+            WHERE s.usedOnlineContext = 0 
+               OR s.explanation LIKE '%The answer is **-%'
+               OR s.explanation LIKE '%Calculation: 10 - 15%'
+               OR s.explanation LIKE '%Calculation: 5 - 8%'
+               OR m.answer LIKE '%Sorry, I couldn%' 
+               OR m.answer LIKE '%Based on on-device knowledge%'
+               OR m.answer LIKE '%The answer is **-%'
+               OR m.answer LIKE '%Calculation: 10 - 15%'
+               OR m.answer LIKE '%Calculation: 5 - 8%'
+            ORDER BY s.timestamp ASC
+        """.trimIndent()
+        helper.readableDatabase.rawQuery(query, null).use { c ->
+            while (c.moveToNext()) {
+                results.add(
+                    ChatSessionEntity(
+                        id = c.getLong(c.getColumnIndexOrThrow("id")),
+                        title = c.getString(c.getColumnIndexOrThrow("title")),
+                        subject = c.getString(c.getColumnIndexOrThrow("subject")),
+                        previewText = c.getString(c.getColumnIndexOrThrow("previewText")),
+                        explanation = c.getString(c.getColumnIndexOrThrow("explanation")),
+                        formula = c.getString(c.getColumnIndexOrThrow("formula")),
+                        bulletPoints = c.getString(c.getColumnIndexOrThrow("bulletPoints")).toStringList(),
+                        usedOnlineContext = c.getInt(c.getColumnIndexOrThrow("usedOnlineContext")) == 1,
+                        timestamp = c.getLong(c.getColumnIndexOrThrow("timestamp"))
+                    )
+                )
+            }
+        }
+        results
+    }
+
     fun getAllSessions(): Flow<List<ChatSessionEntity>> = _allSessions.asStateFlow()
 
     suspend fun insertMessage(message: ChatMessageEntity): Long = withContext(Dispatchers.IO) {
@@ -699,6 +770,7 @@ class ChatDao(private val helper: DbHelper) {
             put("sessionId", message.sessionId)
             put("question", message.question)
             put("answer", message.answer)
+            put("usedOnlineContext", if (message.usedOnlineContext) 1 else 0)
             put("timestamp", message.timestamp)
             put("imagePath", message.imagePath)
         }
@@ -711,7 +783,13 @@ class ChatDao(private val helper: DbHelper) {
             "SELECT * FROM chat_messages WHERE sessionId = ? ORDER BY timestamp ASC",
             arrayOf(sessionId.toString())
         ).use { c ->
+            val onlineCol = c.getColumnIndex("usedOnlineContext")
             while (c.moveToNext()) {
+                val isOnline = if (onlineCol >= 0) {
+                    c.getInt(onlineCol) == 1
+                } else {
+                    c.getString(c.getColumnIndexOrThrow("answer")).contains("📚 Sources:")
+                }
                 results.add(
                     ChatMessageEntity(
                         id = c.getLong(c.getColumnIndexOrThrow("id")),
@@ -719,13 +797,27 @@ class ChatDao(private val helper: DbHelper) {
                         question = c.getString(c.getColumnIndexOrThrow("question")),
                         answer = c.getString(c.getColumnIndexOrThrow("answer")),
                         timestamp = c.getLong(c.getColumnIndexOrThrow("timestamp")),
+<<<<<<< HEAD
                         imagePath = c.getColumnIndex("imagePath").takeIf { it >= 0 }
                             ?.let { idx -> if (c.isNull(idx)) null else c.getString(idx) }
+=======
+                        usedOnlineContext = isOnline
+>>>>>>> 6151f416595a7c84b23fc5a115b4ff341926ae5c
                     )
                 )
             }
         }
         results
+    }
+
+    suspend fun updateMessage(message: ChatMessageEntity) = withContext(Dispatchers.IO) {
+        val values = ContentValues().apply {
+            put("question", message.question)
+            put("answer", message.answer)
+            put("usedOnlineContext", if (message.usedOnlineContext) 1 else 0)
+            put("timestamp", message.timestamp)
+        }
+        helper.writableDatabase.update("chat_messages", values, "id = ?", arrayOf(message.id.toString()))
     }
 
     private suspend fun refreshSessions() = withContext(Dispatchers.IO) {

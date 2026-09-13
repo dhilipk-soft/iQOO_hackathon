@@ -5,11 +5,14 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.studylens.BuildConfig
+import com.studylens.ai.ChatEnrichmentWorker
 import com.studylens.ai.ExplainPipeline
 import com.studylens.ai.FocusNarrator
 import com.studylens.ai.LlmEngine
 import com.studylens.ai.ModelDownloadManager
 import com.studylens.ai.RetrievalClient
+import com.studylens.ai.RetrievalResult
 import com.studylens.input.data.AppDatabase
 import com.studylens.input.data.ChatMessageEntity
 import com.studylens.input.data.ChatSessionEntity
@@ -251,9 +254,18 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         // Collect network state from Member 1's checker
+        var isFirstNetworkEmission = true
         viewModelScope.launch {
             networkChecker.isOnline.collect { online ->
+                val wasOffline = !_isOnline.value
                 _isOnline.value = online
+                if (online && (wasOffline || isFirstNetworkEmission)) {
+                    isFirstNetworkEmission = false
+                    enrichOfflineSessions()
+                    ChatEnrichmentWorker.enqueue(getApplication())
+                } else {
+                    isFirstNetworkEmission = false
+                }
             }
         }
 
@@ -382,18 +394,29 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
             val dbId = found.dbId()
             _followUpList.value = if (dbId != null) {
                 chatDao.getMessagesForSession(dbId).map { m ->
+<<<<<<< HEAD
                     val parsedMsgStructured = StructuredStudyResponseParser.parse(
                         rawOutput = m.answer,
                         fallbackTopic = m.question,
                         inferredIntent = StudyIntentClassifier.classify(m.question)
                     )
+=======
+                    val isMsgOnline = m.usedOnlineContext ||
+                            m.answer.contains("📚 Sources:") ||
+                            m.answer.contains("🌐 Web-Enriched", ignoreCase = true)
+>>>>>>> 6151f416595a7c84b23fc5a115b4ff341926ae5c
                     FollowUpMessage(
                         id = m.id.toString(),
                         question = m.question,
                         answer = m.answer,
+<<<<<<< HEAD
                         timestamp = m.timestamp,
                         structuredResponse = parsedMsgStructured,
                         image = loadBitmapFromPath(m.imagePath)  // Restore uploaded image if present
+=======
+                        usedOnlineContext = isMsgOnline,
+                        timestamp = m.timestamp
+>>>>>>> 6151f416595a7c84b23fc5a115b4ff341926ae5c
                     )
                 }
             } else {
@@ -414,6 +437,10 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
 
     fun toggleSimulatedNetwork() {
         _isOnline.value = !_isOnline.value
+        if (_isOnline.value) {
+            enrichOfflineSessions()
+            ChatEnrichmentWorker.enqueue(getApplication())
+        }
     }
 
     // image != null means multimodal - the photo goes straight to the model, no OCR step.
@@ -495,6 +522,122 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
             )
             _explanationResult.value = result
             _isExplaining.value = false
+
+            if (!result.usedOnlineContext) {
+                ChatEnrichmentWorker.enqueue(getApplication())
+            }
+        }
+    }
+
+    private var isEnrichingOfflineSessions = false
+
+    fun enrichOfflineSessions() {
+        if (!_isOnline.value || isEnrichingOfflineSessions) return
+        isEnrichingOfflineSessions = true
+        viewModelScope.launch {
+            try {
+                val sessionsNeedingEnrichment = chatDao.getSessionsNeedingEnrichment()
+                if (sessionsNeedingEnrichment.isEmpty()) return@launch
+
+                for (session in sessionsNeedingEnrichment) {
+                    val queryTopic = session.previewText.ifBlank { session.title }
+
+                    try {
+                        val retrieval = if (!session.usedOnlineContext && queryTopic.isNotBlank()) {
+                            retrievalClient.fetchOnlineContext(
+                                topic = queryTopic,
+                                openRouterKey = BuildConfig.OPENROUTER_API_KEY,
+                                groqKey = BuildConfig.GROQ_API_KEY
+                            )
+                        } else {
+                            RetrievalResult("")
+                        }
+
+                        // Process all follow-up questions asked in this study session
+                        val messages = chatDao.getMessagesForSession(session.id)
+                        val updatedMessages = mutableListOf<ChatMessageEntity>()
+
+                        for (msg in messages) {
+                            val needsEnrichment = !msg.usedOnlineContext ||
+                                    msg.answer.contains("Sorry, I couldn't generate", ignoreCase = true) ||
+                                    msg.answer.contains("Based on on-device knowledge", ignoreCase = true) ||
+                                    msg.answer.contains("file is not available", ignoreCase = true) ||
+                                    msg.answer.contains("Based on the context you provided", ignoreCase = true)
+
+                            if (needsEnrichment) {
+                                val mathResult = ChatEnrichmentWorker.trySimpleMath(msg.question)
+                                if (mathResult != null) {
+                                    val updatedMsg = msg.copy(answer = mathResult)
+                                    chatDao.updateMessage(updatedMsg)
+                                    updatedMessages.add(updatedMsg)
+                                    continue
+                                }
+
+                                val msgRetrieval = retrievalClient.fetchOnlineContext(
+                                    topic = msg.question,
+                                    openRouterKey = BuildConfig.OPENROUTER_API_KEY,
+                                    groqKey = BuildConfig.GROQ_API_KEY
+                                )
+
+                                if (msgRetrieval.factsText.isNotBlank()) {
+                                    val enrichedAnswer = buildString {
+                                        append(msgRetrieval.factsText.trim())
+                                        if (msgRetrieval.citations.isNotEmpty()) {
+                                            append("\n\n📚 Sources:\n")
+                                            append(msgRetrieval.citations.joinToString("\n") { "• ${it.title}\n  ${it.url}" })
+                                        }
+                                    }
+                                    val updatedMsg = msg.copy(answer = enrichedAnswer, usedOnlineContext = true)
+                                    chatDao.updateMessage(updatedMsg)
+                                    updatedMessages.add(updatedMsg)
+                                } else {
+                                    if (msg.answer.contains("Sorry, I couldn't generate", ignoreCase = true) ||
+                                        msg.answer.contains("file is not available", ignoreCase = true)) {
+                                        val cleanFallback = "Answer for ${msg.question}: Concept registered. Real-time web details will update when available."
+                                        val updatedMsg = msg.copy(answer = cleanFallback)
+                                        chatDao.updateMessage(updatedMsg)
+                                        updatedMessages.add(updatedMsg)
+                                    } else {
+                                        updatedMessages.add(msg)
+                                    }
+                                }
+                            } else {
+                                updatedMessages.add(msg)
+                            }
+                        }
+
+                        val updatedSession = ChatEnrichmentWorker.enrichSession(session, retrieval, updatedMessages)
+                        chatDao.updateSession(updatedSession)
+
+                        // If this session is currently active/open, update UI state immediately
+                        if (_activeSession.value?.dbId() == session.id) {
+                            val domainFollowUps = updatedMessages.map { m ->
+                                val isMsgOnline = m.usedOnlineContext ||
+                                        m.answer.contains("📚 Sources:") ||
+                                        m.answer.contains("🌐 Web-Enriched", ignoreCase = true)
+                                FollowUpMessage(
+                                    id = m.id.toString(),
+                                    question = m.question,
+                                    answer = m.answer,
+                                    usedOnlineContext = isMsgOnline,
+                                    timestamp = m.timestamp
+                                )
+                            }
+                            _activeSession.value = updatedSession.toDomain().copy(followUps = domainFollowUps)
+                            _explanationResult.value = ExplanationResult(
+                                captureId = session.id,
+                                finalExplanation = updatedSession.explanation,
+                                usedOnlineContext = true
+                            )
+                            _followUpList.value = domainFollowUps
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.e("StudyViewModel", "Error enriching session ${session.id}: ${e.message}")
+                    }
+                }
+            } finally {
+                isEnrichingOfflineSessions = false
+            }
         }
     }
 
@@ -589,12 +732,18 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
             )
             val intentToUse = _selectedIntent.value
 
+<<<<<<< HEAD
+=======
+            // Build concise structured context (topic title + last 2 Q&As) so the model
+            // has conversational continuity without drowning out the new question.
+>>>>>>> 6151f416595a7c84b23fc5a115b4ff341926ae5c
             val conversationContext = buildString {
-                append("Topic explanation: ")
-                append(_explanationResult.value?.finalExplanation ?: _activeSession.value?.explanation ?: "")
-                append("\n")
-                _followUpList.value.forEach { fu ->
-                    append("Q: ${fu.question}\nA: ${fu.answer}\n")
+                val topicTitle = _activeSession.value?.title ?: _capturedText.value.take(60)
+                if (topicTitle.isNotBlank()) {
+                    append("Session Topic: $topicTitle\n")
+                }
+                _followUpList.value.takeLast(2).forEach { fu ->
+                    append("Q: ${fu.question}\nA: ${fu.answer.lines().firstOrNull { it.isNotBlank() }?.take(100) ?: ""}\n")
                 }
             }
 
@@ -616,10 +765,17 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
                 chatDao.insertMessage(
                     ChatMessageEntity(
                         sessionId = sessionDbId,
+<<<<<<< HEAD
                         question = cleanQuestion,
                         answer = result.structuredResponse?.rawText ?: result.finalExplanation,
                         timestamp = startTime,
                         imagePath = msgImagePath
+=======
+                        question = question,
+                        answer = result.finalExplanation,
+                        timestamp = startTime,
+                        usedOnlineContext = result.usedOnlineContext
+>>>>>>> 6151f416595a7c84b23fc5a115b4ff341926ae5c
                     )
                 )
             }

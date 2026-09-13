@@ -264,6 +264,7 @@ class ExplainPipeline(
             )
         }
 
+<<<<<<< HEAD
         // 2. Query Resolution:
         // - If there's an image, the question IS about the image; do NOT contaminate with old text topic.
         // - Only prepend mainTopic if this is an implicit pronoun follow-up (no image).
@@ -334,7 +335,35 @@ class ExplainPipeline(
                 rawAnswer = onlineAnswer
                 usedOnline = true
                 Log.i(TAG, "answerFollowUp: used online generation (${rawAnswer.length} chars)")
+=======
+        // Keep only recent context (last 350 chars) so the on-device SLM stays comfortably
+        // within prefill limits and avoids KV cache overflow.
+        val trimmedContext = conversationContext.takeLast(350).trim()
+
+        val prompt = buildString {
+            append("You are StudyLens, a knowledgeable and friendly educational AI tutor.\n\n")
+            append("Student's Question:\n\"$question\"\n\n")
+
+            if (retrieval.factsText.isNotBlank()) {
+                append("Live Information & Enriched Facts:\n")
+                append("${retrieval.factsText.trim()}\n\n")
+                append("Task: Explain the answer to \"$question\" thoroughly and clearly for the student, incorporating the live facts above.\n")
+            } else {
+                append("Task: Explain the answer to \"$question\" clearly, thoroughly, and directly for the student using your knowledge.\n")
             }
+
+            append("Guidelines:\n")
+            append("- Focus completely on answering \"$question\". Provide a clear definition, core principles, and helpful examples.\n")
+            append("- If this is a new question or topic, explain it directly. Do NOT repeat, summarize, or revert to earlier topics unless specifically asked to compare them.\n")
+            append("- Do NOT start with \"Based on the context you provided\" or mention these system guidelines.\n\n")
+
+            if (trimmedContext.isNotBlank()) {
+                append("Earlier Conversation (for background reference only, if the question refers to previous messages):\n")
+                append("$trimmedContext\n\n")
+>>>>>>> 6151f416595a7c84b23fc5a115b4ff341926ae5c
+            }
+
+            append("Tutor explanation for student:")
         }
 
         // 4. Fallback to on-device multimodal LLM (with image if present)
