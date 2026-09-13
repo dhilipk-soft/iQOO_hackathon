@@ -339,6 +339,8 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
             structuredResponse = structured,
             citations = found.citations
         )
+        // Reset KV-cache so tokens from previous chat sessions do not pollute the selected chat
+        llmEngine.resetSession()
         // Load this session's real follow-up thread from SQLite.
         viewModelScope.launch {
             val dbId = found.dbId()
@@ -364,7 +366,7 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun startNewSession() {
-        llmEngine.resetConversation()
+        llmEngine.resetSession()
         _activeSession.value = null
         _capturedText.value = ""
         _explanationResult.value = null
@@ -385,6 +387,8 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
         _capturedText.value = textToProcess
         _isExplaining.value = true
         _followUpList.value = emptyList()
+        // Fresh capture gets a clean KV-cache
+        llmEngine.resetSession()
 
         viewModelScope.launch {
             val startTime = System.currentTimeMillis()
@@ -452,8 +456,65 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun isSummarizeQuery(question: String): Boolean {
+        val lower = question.lowercase()
+        return lower.contains("summarize") || lower.contains("summarise") ||
+                lower.contains("summary") || lower.contains("recap") ||
+                lower.contains("key takeaways")
+    }
+
+    fun summarizeCurrentConversation() {
+        val rootExplanation = _explanationResult.value?.finalExplanation
+            ?: _activeSession.value?.explanation
+            ?: _capturedText.value
+        if (rootExplanation.isBlank()) return
+
+        _isAnsweringFollowUp.value = true
+
+        viewModelScope.launch {
+            val startTime = System.currentTimeMillis()
+            val maxTokens = ModelDownloadManager.getActiveModelMaxTokens(getApplication())
+            val result = explainPipeline.summarizeConversation(
+                rootExplanation = rootExplanation,
+                followUps = _followUpList.value,
+                maxTokens = maxTokens
+            )
+
+            val latency = System.currentTimeMillis() - startTime
+            _vitals.value = _vitals.value.copy(latencyMs = latency)
+
+            val displayQuestion = "✨ Summarize Conversation"
+            val sessionDbId = _activeSession.value?.dbId()
+            if (sessionDbId != null) {
+                chatDao.insertMessage(
+                    ChatMessageEntity(
+                        sessionId = sessionDbId,
+                        question = displayQuestion,
+                        answer = result.finalExplanation,
+                        timestamp = startTime
+                    )
+                )
+            }
+
+            val newMessage = FollowUpMessage(
+                id = System.currentTimeMillis().toString(),
+                question = displayQuestion,
+                answer = result.finalExplanation,
+                usedOnlineContext = result.usedOnlineContext
+            )
+            _followUpList.value = _followUpList.value + newMessage
+            _isAnsweringFollowUp.value = false
+        }
+    }
+
     fun askFollowUp(question: String) {
         if (question.isBlank()) return
+
+        if (isSummarizeQuery(question)) {
+            summarizeCurrentConversation()
+            return
+        }
+
         _isAnsweringFollowUp.value = true
 
         viewModelScope.launch {

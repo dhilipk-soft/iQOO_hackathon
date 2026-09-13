@@ -7,7 +7,9 @@
       "filename": "Qwen2-VL-2B.litertlm",
       "sizeBytes": 1783424544,
       "downloadUrl": "https://huggingface.co/litert-community/Qwen2-VL-2B/resolve/main/Qwen2-VL-2B.litertlm",
-      "isMultimodal": true
+      "isMultimodal": true,
+      "maxTokens": 2048,
+      "profile": "STANDARD"
     },
     {
       "id": "gemma-4-e2b-it",
@@ -16,7 +18,9 @@
       "filename": "gemma-4-E2B-it.litertlm",
       "sizeBytes": 2588147712,
       "downloadUrl": "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm",
-      "isMultimodal": true
+      "isMultimodal": true,
+      "maxTokens": 1536,
+      "profile": "STANDARD"
     },
     {
       "id": "fastvlm-0.5b",
@@ -25,7 +29,9 @@
       "filename": "FastVLM-0.5B.litertlm",
       "sizeBytes": 1156342768,
       "downloadUrl": "https://huggingface.co/litert-community/FastVLM-0.5B/resolve/main/FastVLM-0.5B.litertlm",
-      "isMultimodal": true
+      "isMultimodal": true,
+      "maxTokens": 1024,
+      "profile": "COMPACT"
     }
   ]
 }
