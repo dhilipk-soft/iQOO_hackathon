@@ -46,7 +46,24 @@ class ExplainPipeline(
             retrievalFacts = retrieval.factsText
         )
 
-        val rawResponse = llmEngine.generateResponse(prompt, image)
+        var rawResponse = llmEngine.generateResponse(prompt, image)
+
+        val isFailedResponse = rawResponse.isBlank() ||
+                rawResponse.startsWith("Sorry,", ignoreCase = true) ||
+                rawResponse.contains("couldn't generate an explanation", ignoreCase = true) ||
+                rawResponse.contains("taking longer than expected", ignoreCase = true) ||
+                rawResponse.contains("model isn't loaded", ignoreCase = true)
+
+        if (isFailedResponse && isOnline) {
+            val onlineAnswer = retrievalClient.generateOnlineExplanation(
+                prompt = prompt,
+                openRouterKey = BuildConfig.OPENROUTER_API_KEY,
+                groqKey = BuildConfig.GROQ_API_KEY
+            )
+            if (!onlineAnswer.isNullOrBlank()) {
+                rawResponse = onlineAnswer
+            }
+        }
 
         val structured = StructuredStudyResponseParser.parse(
             rawOutput = rawResponse,
@@ -103,7 +120,24 @@ class ExplainPipeline(
             }
         }
 
-        val rawAnswer = llmEngine.generateResponse(prompt)
+        var rawAnswer = llmEngine.generateResponse(prompt)
+
+        val isFailedResponse = rawAnswer.isBlank() ||
+                rawAnswer.startsWith("Sorry,", ignoreCase = true) ||
+                rawAnswer.contains("couldn't generate an explanation", ignoreCase = true) ||
+                rawAnswer.contains("taking longer than expected", ignoreCase = true) ||
+                rawAnswer.contains("model isn't loaded", ignoreCase = true)
+
+        if (isFailedResponse && isOnline) {
+            val onlineAnswer = retrievalClient.generateOnlineExplanation(
+                prompt = prompt,
+                openRouterKey = BuildConfig.OPENROUTER_API_KEY,
+                groqKey = BuildConfig.GROQ_API_KEY
+            )
+            if (!onlineAnswer.isNullOrBlank()) {
+                rawAnswer = onlineAnswer
+            }
+        }
 
         val structured = StructuredStudyResponseParser.parse(
             rawOutput = rawAnswer,

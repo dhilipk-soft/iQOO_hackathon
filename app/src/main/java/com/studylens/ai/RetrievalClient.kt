@@ -131,10 +131,92 @@ class RetrievalClient {
         return baseResult.copy(citations = finalCitations)
     }
 
+    suspend fun generateOnlineExplanation(
+        prompt: String,
+        openRouterKey: String,
+        groqKey: String
+    ): String? {
+        if (groqKey.isNotBlank()) {
+            try {
+                val groqResp = withTimeoutOrNull(7000L) {
+                    groqApi.queryOnlineContext(
+                        apiKey = "Bearer $groqKey",
+                        request = hashMapOf(
+                            "model" to "openai/gpt-oss-20b",
+                            "temperature" to 0.3,
+                            "max_tokens" to 1200,
+                            "messages" to listOf(
+                                mapOf(
+                                    "role" to "system",
+                                    "content" to "You are an expert tutor in StudyLens. Provide a clear, comprehensive educational explanation using the requested tags: [INTENT], [TITLE], [SUBJECT], ### 🎯 CORE PRINCIPLE, ### 📐 FORMULA & GIVEN, ### 🔍 STEP-BY-STEP BREAKDOWN, ### 💡 REAL-WORLD ANALOGY, ### ⚠️ COMMON PITFALLS, ### ❓ CHECK YOUR UNDERSTANDING. For coding tasks, provide complete working code with edge cases handled."
+                                ),
+                                mapOf("role" to "user", "content" to prompt)
+                            )
+                        )
+                    )
+                }
+                @Suppress("UNCHECKED_CAST")
+                val choices = groqResp?.get("choices") as? List<Map<String, Any>>
+                val message = choices?.firstOrNull()?.get("message") as? Map<String, Any>
+                val content = message?.get("content") as? String
+                if (!content.isNullOrBlank()) {
+                    Log.i(TAG, "Groq online explanation succeeded (${content.length} chars)")
+                    return content
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Groq online generation failed: ${e.message}")
+            }
+        }
+
+        if (openRouterKey.isNotBlank()) {
+            try {
+                val openRouterResp = withTimeoutOrNull(8000L) {
+                    openRouterApi.queryOnlineContext(
+                        apiKey = "Bearer $openRouterKey",
+                        request = hashMapOf(
+                            "model" to "perplexity/sonar",
+                            "temperature" to 0.3,
+                            "max_tokens" to 1000,
+                            "messages" to listOf(
+                                mapOf(
+                                    "role" to "system",
+                                    "content" to "You are an expert educational tutor in StudyLens."
+                                ),
+                                mapOf("role" to "user", "content" to prompt)
+                            )
+                        )
+                    )
+                }
+                @Suppress("UNCHECKED_CAST")
+                val choices = openRouterResp?.get("choices") as? List<Map<String, Any>>
+                val message = choices?.firstOrNull()?.get("message") as? Map<String, Any>
+                val content = message?.get("content") as? String
+                if (!content.isNullOrBlank()) {
+                    Log.i(TAG, "OpenRouter online explanation succeeded (${content.length} chars)")
+                    return stripInlineCitationMarkers(content)
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "OpenRouter online generation failed: ${e.message}")
+            }
+        }
+
+        return null
+    }
+
     companion object {
         fun resolveDefaultEducationalCitations(topic: String): List<VerifiedCitation> {
             val lower = topic.lowercase()
             return when {
+                lower.contains("prime") || lower.contains("prome") || lower.contains("prime number") || lower.contains("sieve") -> listOf(
+                    VerifiedCitation("Prime Number - Wikipedia", "https://en.wikipedia.org/wiki/Prime_number", "Wikipedia", true),
+                    VerifiedCitation("Python 3 Documentation - Math", "https://docs.python.org/3/", "Python Docs", true),
+                    VerifiedCitation("Wolfram MathWorld - Prime Numbers", "https://mathworld.wolfram.com/PrimeNumber.html", "Wolfram MathWorld", true)
+                )
+                lower.contains("reverse") || lower.contains("palindrome") || lower.contains("string") -> listOf(
+                    VerifiedCitation("Python String Methods Reference", "https://docs.python.org/3/library/stdtypes.html#string-methods", "Python Docs", true),
+                    VerifiedCitation("GeeksforGeeks Algorithms", "https://www.geeksforgeeks.org", "GeeksforGeeks", true),
+                    VerifiedCitation("MDN Web Docs - String Operations", "https://developer.mozilla.org", "MDN Web Docs", true)
+                )
                 lower.contains("fastapi") || lower.contains("fast api") -> listOf(
                     VerifiedCitation("FastAPI Official Documentation", "https://fastapi.tiangolo.com", "FastAPI Docs", true),
                     VerifiedCitation("FastAPI - Wikipedia", "https://en.wikipedia.org/wiki/FastAPI", "Wikipedia", true),

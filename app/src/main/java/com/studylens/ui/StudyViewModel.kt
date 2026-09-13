@@ -368,6 +368,7 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
         _capturedText.value = ""
         _explanationResult.value = null
         _followUpList.value = emptyList()
+        _selectedIntent.value = StudyIntent.AUTO
     }
 
     fun toggleSimulatedNetwork() {

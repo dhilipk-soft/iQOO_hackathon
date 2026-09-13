@@ -134,4 +134,95 @@ class StructuredEducationalOutputTest {
         assertTrue(parsed.citations.isNotEmpty())
         assertTrue(parsed.citations.any { it.domain.contains("FastAPI") || it.url.contains("fastapi") })
     }
+
+    @Test
+    fun testIntentClassifier_defaultAuto_routesCodeQueriesAccurately() {
+        // When no intent is explicitly selected by user, default is AUTO
+        val primeIntent = StudyIntentClassifier.classify("Can you give me code for prime number", userPreference = StudyIntent.AUTO)
+        assertEquals(StudyIntent.CODE_AND_ALGORITHM, primeIntent)
+
+        val promeIntent = StudyIntentClassifier.classify("prome number", userPreference = StudyIntent.AUTO)
+        assertEquals(StudyIntent.CODE_AND_ALGORITHM, promeIntent)
+
+        val reverseIntent = StudyIntentClassifier.classify("reverse a string", userPreference = StudyIntent.AUTO)
+        assertEquals(StudyIntent.CODE_AND_ALGORITHM, reverseIntent)
+    }
+
+    @Test
+    fun testStructuredResponseParser_primeNumber_modelFailureRecoversWithCompleteEdgeCases() {
+        val failureText = "Sorry, I couldn't generate an explanation just now. Please try again."
+
+        val parsed = StructuredStudyResponseParser.parse(
+            rawOutput = failureText,
+            fallbackTopic = "Can you give me code for prime number",
+            inferredIntent = StudyIntent.CODE_AND_ALGORITHM
+        )
+
+        // 1. Must NOT leak the model failure text
+        assertTrue(!parsed.coreConcept.contains("Sorry"))
+        assertTrue(!parsed.coreConcept.contains("couldn't generate"))
+
+        // 2. Intent and subject must be correctly attributed
+        assertEquals(StudyIntent.CODE_AND_ALGORITHM, parsed.intent)
+        assertEquals("Computer Science", parsed.subject)
+
+        // 3. Mathematical precision: primes > 1, 0 and 1 are not prime
+        assertTrue(parsed.coreConcept.contains("positive natural number strictly greater than 1"))
+        assertTrue(parsed.coreConcept.contains("0 and 1 are neither prime nor composite"))
+
+        // 4. Code block must exist and cover edge cases (n <= 1, 2, 3, even numbers, 6k ± 1)
+        assertNotNull(parsed.formulaOrCode)
+        assertTrue(parsed.formulaOrCode!!.isCode)
+        val code = parsed.formulaOrCode!!.content
+        assertTrue("Code should handle n <= 1 edge case", code.contains("if n <= 1"))
+        assertTrue("Code should handle 2 and 3 edge case", code.contains("if n <= 3"))
+        assertTrue("Code should filter even numbers and multiples of 3", code.contains("n % 2 == 0 or n % 3 == 0"))
+        assertTrue("Code should use sqrt(n) loop", code.contains("i * i <= n"))
+        assertTrue("Code should include test cases with negatives and 0", code.contains("is_prime(-5)") && code.contains("is_prime(0)"))
+
+        // 5. Steps must highlight boundary conditions and time complexity
+        assertTrue(parsed.steps.size >= 4)
+        assertTrue(parsed.steps.any { it.contains("Boundary Edge Cases") || it.contains("≤ 1") })
+
+        // 6. Real-world analogy & Common pitfalls
+        assertNotNull(parsed.analogy)
+        assertTrue(parsed.analogy!!.contains("Fundamental Theorem of Arithmetic") || parsed.analogy!!.contains("chemical elements"))
+        assertTrue(parsed.commonPitfalls.any { it.contains("Treating 1 as a prime number") })
+        assertTrue(parsed.commonPitfalls.any { it.contains("O(√n)") || it.contains("O(n)") })
+
+        // 7. Quick check question & answer
+        assertNotNull(parsed.quickCheck)
+        assertTrue(parsed.quickCheck!!.question.contains("2 the only even prime number"))
+
+        // 8. Citations
+        assertTrue(parsed.citations.isNotEmpty())
+        assertTrue(parsed.citations.any { it.domain == "Wikipedia" || it.domain == "Wolfram MathWorld" })
+    }
+
+    @Test
+    fun testStructuredResponseParser_reverseString_coversEdgeCases() {
+        val rawShortText = "To reverse a string in Python, you can use slicing or two pointers."
+
+        val parsed = StructuredStudyResponseParser.parse(
+            rawOutput = rawShortText,
+            fallbackTopic = "reverse a string",
+            inferredIntent = StudyIntent.CODE_AND_ALGORITHM
+        )
+
+        assertEquals(StudyIntent.CODE_AND_ALGORITHM, parsed.intent)
+        assertEquals("Computer Science", parsed.subject)
+
+        assertNotNull(parsed.formulaOrCode)
+        assertTrue(parsed.formulaOrCode!!.isCode)
+        val code = parsed.formulaOrCode!!.content
+        assertTrue("Code must handle empty/single char edge cases", code.contains("len(s) <= 1"))
+        assertTrue("Code must use two pointers", code.contains("left < right"))
+        assertTrue("Code must assert edge cases", code.contains("reverse_string(\"\")") && code.contains("reverse_string(\"a\")"))
+
+        assertNotNull(parsed.analogy)
+        assertTrue(parsed.commonPitfalls.any { it.contains("immutable strings") })
+        assertNotNull(parsed.quickCheck)
+        assertTrue(parsed.citations.isNotEmpty())
+    }
 }
+

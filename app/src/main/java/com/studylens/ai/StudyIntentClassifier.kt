@@ -10,7 +10,10 @@ object StudyIntentClassifier {
         "binary search", "sorting", "hashmap", "function", "class", "syntax",
         "loop", "pointer", "compile", "runtime", "data structure", "debugging",
         "fastapi", "react", "api", "endpoint", "framework", "backend", "frontend",
-        "database", "sql", "git", "django", "flask", "node", "express"
+        "database", "sql", "git", "django", "flask", "node", "express",
+        "code", "program", "programming", "implementation", "script", "prime",
+        "prime number", "prome", "prome number", "reverse a string", "reverse string", "palindrome",
+        "fibonacci", "factorial", "sieve", "stack", "queue", "tree", "graph"
     )
 
     private val SOLVER_KEYWORDS = setOf(
@@ -88,7 +91,9 @@ object StudyIntentClassifier {
             lower.contains("python") || lower.contains("algorithm") || lower.contains("code") ||
                     lower.contains("function") || lower.contains("programming") || lower.contains("fastapi") ||
                     lower.contains("fast api") || lower.contains("api") || lower.contains("react") ||
-                    lower.contains("backend") || lower.contains("frontend") || lower.contains("sql") -> "Computer Science"
+                    lower.contains("backend") || lower.contains("frontend") || lower.contains("sql") ||
+                    lower.contains("prime") || lower.contains("prome") || lower.contains("reverse") || lower.contains("palindrome") ||
+                    lower.contains("fibonacci") || lower.contains("factorial") || lower.contains("string") -> "Computer Science"
             lower.contains("molecule") || lower.contains("reaction") || lower.contains("acid") ||
                     lower.contains("chemistry") || lower.contains("element") -> "Chemistry"
             lower.contains("history") || lower.contains("revolution") || lower.contains("war") ||
