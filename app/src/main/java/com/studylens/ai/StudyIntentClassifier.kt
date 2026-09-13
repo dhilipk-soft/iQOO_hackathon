@@ -4,16 +4,27 @@ import com.studylens.shared.StudyIntent
 
 object StudyIntentClassifier {
 
-    private val CODE_KEYWORDS = setOf(
+    // Keywords that EXPLICITLY request code generation (write, implement, code, program, etc.)
+    private val EXPLICIT_CODE_TRIGGERS = setOf(
+        "write a", "write the", "write code", "write function", "write program",
+        "code for", "code a", "implement", "implementation", "program for", "program to",
+        "create a function", "create a program", "give me the code", "give code",
+        "show code", "show the code", "make a function", "make a program",
+        "build a function", "build the function", "how to code", "how to implement",
+        "how to write", "algorithm for", "script for", "script to",
+        "reverse a string", "reverse string", "is prime", "is_prime", "prime check",
+        "fibonacci series", "factorial of", "sieve of", "binary search code",
+        "sort algorithm", "sorting algorithm"
+    )
+
+    // Tech/CS concept keywords - used to tag subject area only, NOT to force CODE_AND_ALGORITHM intent
+    private val TECH_CONCEPT_KEYWORDS = setOf(
         "python", "kotlin", "java", "c++", "javascript", "typescript", "swift",
-        "algorithm", "complexity", "big o", "recursion", "array", "linked list",
-        "binary search", "sorting", "hashmap", "function", "class", "syntax",
-        "loop", "pointer", "compile", "runtime", "data structure", "debugging",
-        "fastapi", "react", "api", "endpoint", "framework", "backend", "frontend",
-        "database", "sql", "git", "django", "flask", "node", "express",
-        "code", "program", "programming", "implementation", "script", "prime",
-        "prime number", "prome", "prome number", "reverse a string", "reverse string", "palindrome",
-        "fibonacci", "factorial", "sieve", "stack", "queue", "tree", "graph"
+        "fastapi", "fast api", "pydantic", "react", "django", "flask", "node", "express",
+        "api", "endpoint", "framework", "backend", "frontend", "database", "sql", "git",
+        "algorithm", "complexity", "big o", "recursion", "data structure", "linked list",
+        "hashmap", "stack", "queue", "tree", "graph", "fibonacci", "factorial", "sieve",
+        "binary search", "sorting", "loop", "pointer", "compile", "runtime", "debugging"
     )
 
     private val SOLVER_KEYWORDS = setOf(
@@ -50,10 +61,14 @@ object StudyIntentClassifier {
             return StudyIntent.REVISION_SUMMARY
         }
 
-        // 2. Code & Programming intent
-        if (lower.contains("```") || lower.contains("def ") || lower.contains("fun ") ||
-            CODE_KEYWORDS.any { lower.contains(it) }
-        ) {
+        // 2. Code & Programming intent - ONLY when user explicitly requests code/implementation
+        // "What is FastAPI" or "Explain pydantic" = CONCEPT, not CODE.
+        // "Write a FastAPI endpoint" or "implement binary search" = CODE.
+        val hasExplicitCodeBlock = lower.contains("```") || lower.contains("def ") ||
+                (lower.contains("fun ") && !lower.startsWith("fun "))  // Kotlin fun keyword in snippet
+        val hasExplicitCodeRequest = EXPLICIT_CODE_TRIGGERS.any { lower.contains(it) }
+
+        if (hasExplicitCodeBlock || hasExplicitCodeRequest) {
             return StudyIntent.CODE_AND_ALGORITHM
         }
 
@@ -75,6 +90,7 @@ object StudyIntentClassifier {
         // 5. Default pedagogical anchor: Concept Deep-Dive
         return StudyIntent.CONCEPT_EXPLANATION
     }
+
 
     fun inferSubject(text: String, intent: StudyIntent): Pair<String, String> {
         val lower = text.lowercase()

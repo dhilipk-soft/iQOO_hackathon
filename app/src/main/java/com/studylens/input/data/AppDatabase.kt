@@ -148,7 +148,8 @@ data class ChatSessionEntity(
     val formula: String?,
     val bulletPoints: List<String>,
     val usedOnlineContext: Boolean,
-    val timestamp: Long
+    val timestamp: Long,
+    val imagePath: String? = null  // Path to captured session image in internal storage
 )
 
 data class ChatMessageEntity(
@@ -156,7 +157,8 @@ data class ChatMessageEntity(
     val sessionId: Long,
     val question: String,
     val answer: String,
-    val timestamp: Long
+    val timestamp: Long,
+    val imagePath: String? = null  // Path to uploaded image for this follow-up message
 )
 
 private fun List<String>.toDbString(): String = joinToString("|||")
@@ -166,7 +168,7 @@ private fun String.toStringList(): List<String> = if (isBlank()) emptyList() els
 // SQLite schema
 // ----------------------------------------------------
 
-class DbHelper(context: Context) : SQLiteOpenHelper(context, "studylens_db", null, 2) {
+class DbHelper(context: Context) : SQLiteOpenHelper(context, "studylens_db", null, 3) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
             """CREATE TABLE study_captures (
@@ -201,7 +203,7 @@ class DbHelper(context: Context) : SQLiteOpenHelper(context, "studylens_db", nul
             )"""
         )
         db.execSQL(
-            """CREATE TABLE chat_sessions (
+            """CREATE TABLE IF NOT EXISTS chat_sessions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 title TEXT NOT NULL,
                 subject TEXT NOT NULL,
@@ -210,7 +212,8 @@ class DbHelper(context: Context) : SQLiteOpenHelper(context, "studylens_db", nul
                 formula TEXT,
                 bulletPoints TEXT NOT NULL,
                 usedOnlineContext INTEGER NOT NULL,
-                timestamp INTEGER NOT NULL
+                timestamp INTEGER NOT NULL,
+                imagePath TEXT
             )"""
         )
         db.execSQL(
@@ -219,7 +222,8 @@ class DbHelper(context: Context) : SQLiteOpenHelper(context, "studylens_db", nul
                 sessionId INTEGER NOT NULL,
                 question TEXT NOT NULL,
                 answer TEXT NOT NULL,
-                timestamp INTEGER NOT NULL
+                timestamp INTEGER NOT NULL,
+                imagePath TEXT
             )"""
         )
         db.execSQL(
@@ -304,6 +308,9 @@ class DbHelper(context: Context) : SQLiteOpenHelper(context, "studylens_db", nul
                 actionPlan TEXT NOT NULL DEFAULT ''
             )"""
         )
+        // Safe migration: add imagePath columns if they don't exist (for existing installs)
+        try { db.execSQL("ALTER TABLE chat_sessions ADD COLUMN imagePath TEXT") } catch (_: Exception) {}
+        try { db.execSQL("ALTER TABLE chat_messages ADD COLUMN imagePath TEXT") } catch (_: Exception) {}
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -677,6 +684,7 @@ class ChatDao(private val helper: DbHelper) {
                 put("bulletPoints", session.bulletPoints.toDbString())
                 put("usedOnlineContext", if (session.usedOnlineContext) 1 else 0)
                 put("timestamp", session.timestamp)
+                put("imagePath", session.imagePath)
             }
             helper.writableDatabase.insert("chat_sessions", null, values)
         }
@@ -692,6 +700,7 @@ class ChatDao(private val helper: DbHelper) {
             put("question", message.question)
             put("answer", message.answer)
             put("timestamp", message.timestamp)
+            put("imagePath", message.imagePath)
         }
         helper.writableDatabase.insert("chat_messages", null, values)
     }
@@ -709,7 +718,9 @@ class ChatDao(private val helper: DbHelper) {
                         sessionId = c.getLong(c.getColumnIndexOrThrow("sessionId")),
                         question = c.getString(c.getColumnIndexOrThrow("question")),
                         answer = c.getString(c.getColumnIndexOrThrow("answer")),
-                        timestamp = c.getLong(c.getColumnIndexOrThrow("timestamp"))
+                        timestamp = c.getLong(c.getColumnIndexOrThrow("timestamp")),
+                        imagePath = c.getColumnIndex("imagePath").takeIf { it >= 0 }
+                            ?.let { idx -> if (c.isNull(idx)) null else c.getString(idx) }
                     )
                 )
             }
@@ -746,7 +757,9 @@ class ChatDao(private val helper: DbHelper) {
                         formula = c.getString(c.getColumnIndexOrThrow("formula")),
                         bulletPoints = c.getString(c.getColumnIndexOrThrow("bulletPoints")).toStringList(),
                         usedOnlineContext = c.getInt(c.getColumnIndexOrThrow("usedOnlineContext")) == 1,
-                        timestamp = c.getLong(c.getColumnIndexOrThrow("timestamp"))
+                        timestamp = c.getLong(c.getColumnIndexOrThrow("timestamp")),
+                        imagePath = c.getColumnIndex("imagePath").takeIf { it >= 0 }
+                            ?.let { idx -> if (c.isNull(idx)) null else c.getString(idx) }
                     )
                 )
             }

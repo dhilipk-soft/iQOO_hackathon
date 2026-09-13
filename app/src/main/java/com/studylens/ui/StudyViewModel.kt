@@ -2,6 +2,7 @@ package com.studylens.ui
 
 import android.app.Application
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.studylens.ai.ExplainPipeline
@@ -48,6 +49,8 @@ import com.studylens.ai.StudyIntentClassifier
 import com.studylens.shared.FormulaCodeBlock
 import com.studylens.shared.StructuredStudyResponse
 import com.studylens.shared.StudyIntent
+import java.io.File
+import java.io.FileOutputStream
 import com.studylens.shared.VerifiedCitation
 
 data class FollowUpMessage(
@@ -93,6 +96,34 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
 
     private val database = AppDatabase.getDatabase(application)
     private val chatDao = database.chatDao()
+
+    /** Save a Bitmap to internal storage and return its file path. Returns null if bitmap is null or save fails. */
+    private fun saveBitmapToFile(bitmap: Bitmap?, prefix: String = "img"): String? {
+        if (bitmap == null) return null
+        return try {
+            val dir = File(getApplication<Application>().filesDir, "chat_images")
+            dir.mkdirs()
+            val file = File(dir, "${prefix}_${System.currentTimeMillis()}.jpg")
+            FileOutputStream(file).use { out ->
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 85, out)
+            }
+            file.absolutePath
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /** Load a Bitmap from a stored file path. Returns null if path is null or file doesn't exist. */
+    private fun loadBitmapFromPath(path: String?): Bitmap? {
+        if (path == null) return null
+        return try {
+            val file = File(path)
+            if (file.exists()) BitmapFactory.decodeFile(file.absolutePath) else null
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     val usageCollector = try {
         com.studylens.StudyLensApp.instance.usageCollector
     } catch (e: Exception) {
@@ -302,7 +333,8 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
             usedOnlineContext = usedOnlineContext,
             followUps = emptyList(), // loaded on-demand in selectSession()
             structuredResponse = parsedStructured,
-            citations = emptyList()
+            citations = emptyList(),
+            image = loadBitmapFromPath(imagePath)  // Restore session image from internal storage
         )
     }
 
@@ -360,7 +392,8 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
                         question = m.question,
                         answer = m.answer,
                         timestamp = m.timestamp,
-                        structuredResponse = parsedMsgStructured
+                        structuredResponse = parsedMsgStructured,
+                        image = loadBitmapFromPath(m.imagePath)  // Restore uploaded image if present
                     )
                 }
             } else {
@@ -431,6 +464,7 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
             )
 
             // Persist to SQLite
+            val sessionImagePath = saveBitmapToFile(image, "session")
             val dbId = chatDao.insertSession(
                 ChatSessionEntity(
                     title = topicTitle,
@@ -440,7 +474,8 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
                     formula = topicFormula,
                     bulletPoints = bulletPoints,
                     usedOnlineContext = result.usedOnlineContext,
-                    timestamp = startTime
+                    timestamp = startTime,
+                    imagePath = sessionImagePath
                 )
             )
 
@@ -465,17 +500,27 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
 
     fun isSummarizeQuery(question: String): Boolean {
         val lower = question.lowercase().trim()
+        // Exact keyword matches
         val keywords = listOf(
             "summarize", "summarise", "summary", "recap", "key takeaways",
             "takeaways", "whole context", "all context", "full context",
             "context of this chat", "context of the chat", "context of our chat",
-            "what did we talk about", "what did we discuss", "what have we discussed",
-            "what have we talked about", "what were the topics", "overview of this chat",
-            "overview of the chat", "review of this chat", "everything we discussed",
-            "everything we covered", "technologies covered", "technologies discussed",
-            "topics covered"
+            "context of our conversation", "give me the context", "show me the context",
+            "what is the context", "context of this", "what did we talk about",
+            "what did we discuss", "what have we discussed", "what have we talked about",
+            "what were the topics", "overview of this chat", "overview of the chat",
+            "review of this chat", "everything we discussed", "everything we covered",
+            "technologies covered", "technologies discussed", "topics covered",
+            "topics discussed", "what was discussed", "covered so far",
+            "gist of", "gist", "brief me", "brief overview"
         )
-        return keywords.any { lower.contains(it) }
+        if (keywords.any { lower.contains(it) }) return true
+
+        // Regex patterns for typos and variations: "contzt", "contextt", "contxt", etc.
+        val contextVariationRegex = Regex("""con[a-z]?t[a-z]{0,3}[tx]+(?:\s+of)?""")
+        if (contextVariationRegex.containsMatchIn(lower)) return true
+
+        return false
     }
 
     fun summarizeCurrentConversation() {
@@ -567,12 +612,14 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
 
             val sessionDbId = _activeSession.value?.dbId()
             if (sessionDbId != null) {
+                val msgImagePath = saveBitmapToFile(image, "msg")
                 chatDao.insertMessage(
                     ChatMessageEntity(
                         sessionId = sessionDbId,
                         question = cleanQuestion,
                         answer = result.structuredResponse?.rawText ?: result.finalExplanation,
-                        timestamp = startTime
+                        timestamp = startTime,
+                        imagePath = msgImagePath
                     )
                 )
             }

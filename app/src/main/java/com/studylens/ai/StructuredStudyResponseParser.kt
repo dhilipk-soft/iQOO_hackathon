@@ -173,36 +173,18 @@ object StructuredStudyResponseParser {
             }
         }
 
+        // Code/formula block: ONLY inject if the model generated it in its response OR
+        // the resolved intent is CODE_AND_ALGORITHM with a direct algorithmic query.
+        // Never inject code for conceptual questions like "what is FastAPI", "explain pydantic", "react architecture".
+        val isExplicitCodeIntent = inferredIntent == StudyIntent.CODE_AND_ALGORITHM ||
+                parsedIntent == StudyIntent.CODE_AND_ALGORITHM
+
         val finalFormulaOrCode = formulaOrCodeBlock ?: when {
+            // Math/Science formulas: safe to always show for matching concept queries
             Regex("""\b(even\s+numbers?|parity|even\s+and\s+odd|odd\s+and\s+even|what\s+is\s+an?\s+even\s+number|is\s+-?\d+\s+even)\b""").containsMatchIn(lowerCombined) -> FormulaCodeBlock(
                 content = "n = 2k  (where k ∈ ℤ)\nn % 2 == 0  => True for even numbers\nParity: Even + Even = Even | Even + Odd = Odd\nExamples: ..., -4, -2, 0, 2, 4, 6, 8, ...",
                 languageOrType = "math",
                 isCode = false
-            )
-            lowerCombined.contains("prime") || lowerCombined.contains("prome") || lowerCombined.contains("prime number") || lowerCombined.contains("sieve") -> FormulaCodeBlock(
-                content = "def is_prime(n: int) -> bool:\n    \"\"\"Determines if n is prime with full edge case coverage.\n    Time: O(sqrt(n)), Auxiliary Space: O(1)\n    \"\"\"\n    # Edge Case 1: Integers <= 1 (negatives, 0, 1) are not prime\n    if n <= 1:\n        return False\n    # Edge Case 2: 2 and 3 are prime (2 is the ONLY even prime)\n    if n <= 3:\n        return True\n    # Edge Case 3: Filter even numbers and multiples of 3\n    if n % 2 == 0 or n % 3 == 0:\n        return False\n    \n    # Check divisors up to sqrt(n) with 6k ± 1 optimization\n    i = 5\n    while i * i <= n:\n        if n % i == 0 or n % (i + 2) == 0:\n            return False\n        i += 6\n    return True\n\n# Edge case verification:\nprint('is_prime(-5):', is_prime(-5)) # False (negative)\nprint('is_prime(0):', is_prime(0))   # False (zero)\nprint('is_prime(1):', is_prime(1))   # False (one)\nprint('is_prime(2):', is_prime(2))   # True (smallest even prime)\nprint('is_prime(29):', is_prime(29)) # True (prime)\nprint('is_prime(49):', is_prime(49)) # False (7*7 composite)",
-                languageOrType = "python",
-                isCode = true
-            )
-            lowerCombined.contains("reverse") || lowerCombined.contains("string reverse") -> FormulaCodeBlock(
-                content = "def reverse_string(s: str) -> str:\n    \"\"\"Reverses a string handling all edge cases (empty, single-char, unicode).\n    Method 1: Two-pointer in-place swap on mutable list (O(n) time, O(1) space).\n    Method 2: Pythonic slice return s[::-1]\n    \"\"\"\n    # Edge Case: empty or single-character string\n    if len(s) <= 1:\n        return s\n    \n    chars = list(s)\n    left, right = 0, len(chars) - 1\n    while left < right:\n        chars[left], chars[right] = chars[right], chars[left]\n        left += 1\n        right -= 1\n    return \"\".join(chars)\n\n# Edge case tests:\nassert reverse_string(\"\") == \"\"               # Empty string\nassert reverse_string(\"a\") == \"a\"             # Single character\nassert reverse_string(\"racecar\") == \"racecar\" # Palindrome\nassert reverse_string(\"StudyLens 2026!\") == \"!6202 sneLydutS\"",
-                languageOrType = "python",
-                isCode = true
-            )
-            lowerCombined.contains("fastapi") || lowerCombined.contains("fast api") -> FormulaCodeBlock(
-                content = "from fastapi import FastAPI\n\napp = FastAPI()\n\n@app.get(\"/\")\nasync def read_root():\n    return {\"status\": \"FastAPI is running\", \"docs\": \"/docs\"}",
-                languageOrType = "python",
-                isCode = true
-            )
-            lowerCombined.contains("react") -> FormulaCodeBlock(
-                content = "import { useState } from 'react';\n\nexport default function Counter() {\n  const [count, setCount] = useState(0);\n  return <button onClick={() => setCount(count + 1)}>Count: {count}</button>;\n}",
-                languageOrType = "javascript",
-                isCode = true
-            )
-            lowerCombined.contains("python") || lowerCombined.contains("binary search") -> FormulaCodeBlock(
-                content = "def binary_search(arr, target):\n    low, high = 0, len(arr) - 1\n    while low <= high:\n        mid = (low + high) // 2\n        if arr[mid] == target: return mid\n        elif arr[mid] < target: low = mid + 1\n        else: high = mid - 1\n    return -1",
-                languageOrType = "python",
-                isCode = true
             )
             lowerCombined.contains("quadratic") || lowerCombined.contains("discriminant") -> FormulaCodeBlock(
                 content = "x = (-b ± √(b² - 4ac)) / (2a)\nDiscriminant Δ = b² - 4ac",
@@ -214,7 +196,7 @@ object StructuredStudyResponseParser {
                 languageOrType = "chemistry",
                 isCode = false
             )
-            lowerCombined.contains("newton") || lowerCombined.contains("force") -> FormulaCodeBlock(
+            lowerCombined.contains("newton") && (lowerCombined.contains("force") || lowerCombined.contains("law") || lowerCombined.contains("motion")) -> FormulaCodeBlock(
                 content = "F = m · a\n(Force = Mass × Acceleration | Unit: Newtons [N])",
                 languageOrType = "physics",
                 isCode = false
@@ -228,6 +210,17 @@ object StructuredStudyResponseParser {
                 content = "a² + b² = c²  =>  c = √(a² + b²)",
                 languageOrType = "geometry",
                 isCode = false
+            )
+            // Code blocks: ONLY inject when explicitly requested (intent = CODE)
+            isExplicitCodeIntent && (lowerCombined.contains("prime") || lowerCombined.contains("prome") || lowerCombined.contains("prime number") || lowerCombined.contains("sieve")) -> FormulaCodeBlock(
+                content = "def is_prime(n: int) -> bool:\n    \"\"\"Determines if n is prime with full edge case coverage.\n    Time: O(sqrt(n)), Auxiliary Space: O(1)\n    \"\"\"\n    # Edge Case 1: Integers <= 1 (negatives, 0, 1) are not prime\n    if n <= 1:\n        return False\n    # Edge Case 2: 2 and 3 are prime (2 is the ONLY even prime)\n    if n <= 3:\n        return True\n    # Edge Case 3: Filter even numbers and multiples of 3\n    if n % 2 == 0 or n % 3 == 0:\n        return False\n    \n    # Check divisors up to sqrt(n) with 6k ± 1 optimization\n    i = 5\n    while i * i <= n:\n        if n % i == 0 or n % (i + 2) == 0:\n            return False\n        i += 6\n    return True\n\n# Edge case verification:\nprint('is_prime(-5):', is_prime(-5)) # False (negative)\nprint('is_prime(0):', is_prime(0))   # False (zero)\nprint('is_prime(1):', is_prime(1))   # False (one)\nprint('is_prime(2):', is_prime(2))   # True (smallest even prime)\nprint('is_prime(29):', is_prime(29)) # True (prime)\nprint('is_prime(49):', is_prime(49)) # False (7*7 composite)",
+                languageOrType = "python",
+                isCode = true
+            )
+            isExplicitCodeIntent && (lowerCombined.contains("reverse") && (lowerCombined.contains("string") || lowerCombined.contains("reverse a"))) -> FormulaCodeBlock(
+                content = "def reverse_string(s: str) -> str:\n    \"\"\"Reverses a string handling all edge cases (empty, single-char, unicode).\n    Method 1: Two-pointer in-place swap on mutable list (O(n) time, O(1) space).\n    Method 2: Pythonic slice return s[::-1]\n    \"\"\"\n    # Edge Case: empty or single-character string\n    if len(s) <= 1:\n        return s\n    \n    chars = list(s)\n    left, right = 0, len(chars) - 1\n    while left < right:\n        chars[left], chars[right] = chars[right], chars[left]\n        left += 1\n        right -= 1\n    return \"\".join(chars)\n\n# Edge case tests:\nassert reverse_string(\"\") == \"\"               # Empty string\nassert reverse_string(\"a\") == \"a\"             # Single character\nassert reverse_string(\"racecar\") == \"racecar\" # Palindrome\nassert reverse_string(\"StudyLens 2026!\") == \"!6202 sneLydutS\"",
+                languageOrType = "python",
+                isCode = true
             )
             else -> null
         }

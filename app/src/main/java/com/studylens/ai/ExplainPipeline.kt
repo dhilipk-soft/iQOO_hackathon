@@ -1,6 +1,7 @@
 package com.studylens.ai
 
 import android.graphics.Bitmap
+import android.util.Log
 import com.studylens.BuildConfig
 import com.studylens.shared.ExplanationResult
 import com.studylens.shared.QuizQuestion
@@ -14,6 +15,10 @@ class ExplainPipeline(
     private val llmEngine: LlmEngine,
     private val retrievalClient: RetrievalClient
 ) : StudyBrain {
+
+    companion object {
+        private const val TAG = "ExplainPipeline"
+    }
 
     private fun appendCitations(text: String, citations: List<VerifiedCitation>): String {
         if (citations.isEmpty()) return text
@@ -259,37 +264,34 @@ class ExplainPipeline(
             )
         }
 
-        // 2. Query Resolution: ONLY resolve mainTopic if question contains pronouns
+        // 2. Query Resolution:
+        // - If there's an image, the question IS about the image; do NOT contaminate with old text topic.
+        // - Only prepend mainTopic if this is an implicit pronoun follow-up (no image).
         val mainTopic = capture.extractedText.ifBlank { "Study Topic" }
-        val searchQuery = if (isImplicitFollowUp(question)) {
-            "$mainTopic $question"
-        } else {
-            question
-        }
-
-        // 3. Web Retrieval
-        val retrieval = if (isOnline) {
-            retrievalClient.fetchOnlineContext(
-                searchQuery,
-                BuildConfig.OPENROUTER_API_KEY,
-                BuildConfig.GROQ_API_KEY
-            )
-        } else {
-            RetrievalResult("")
+        val searchQuery = when {
+            image != null -> question.ifBlank { "Explain this image in detail." }  // Image = isolated query
+            isImplicitFollowUp(question) -> "$mainTopic $question"               // Pronoun follow-up
+            else -> question
         }
 
         val resolvedIntent = StudyIntentClassifier.classify(question, preferredIntent)
         val profile = llmEngine.getActiveProfile()
-        val trimmedContext = if (isImplicitFollowUp(question)) conversationContext.takeLast(1500) else conversationContext.takeLast(3000)
+        val trimmedContext = if (image != null) {
+            // For image-based follow-ups, do NOT include previous topic context
+            ""
+        } else if (isImplicitFollowUp(question)) {
+            conversationContext.takeLast(1500)
+        } else {
+            conversationContext.takeLast(3000)
+        }
 
         val prompt = buildString {
             append(buildSystemHeader(profile))
             append("\n\n")
-            if (trimmedContext.isNotBlank()) {
+            if (image != null) {
+                append("Analyze the attached image carefully and answer the student's question about it.\n\n")
+            } else if (trimmedContext.isNotBlank()) {
                 append("Topic Context:\n$trimmedContext\n\n")
-            }
-            if (retrieval.factsText.isNotBlank()) {
-                append("Retrieved Web Facts:\n${retrieval.factsText}\n\n")
             }
             append("Student Question: \"$question\"\n\n")
             append("Format your response using structured tags:\n")
@@ -304,29 +306,53 @@ class ExplainPipeline(
             append("Direct Answer:")
         }
 
-        var rawAnswer = llmEngine.generateResponse(prompt, image)
+        // 3. Online-first strategy: When online, use the web-powered generator first
+        var rawAnswer = ""
+        var usedOnline = false
+        var retrieval = RetrievalResult("")
 
-        val isFailedAnswer = rawAnswer.isBlank() ||
-                rawAnswer.startsWith("Sorry,", ignoreCase = true) ||
-                rawAnswer.contains("couldn't generate an explanation", ignoreCase = true) ||
-                rawAnswer.contains("taking longer than expected", ignoreCase = true) ||
-                rawAnswer.contains("model isn't loaded", ignoreCase = true) ||
-                isTrivialOrEcho(rawAnswer, question)
-
-        if (isFailedAnswer) {
-            if (isOnline) {
-                val onlineAnswer = retrievalClient.generateOnlineExplanation(
-                    prompt = prompt,
-                    openRouterKey = BuildConfig.OPENROUTER_API_KEY,
-                    groqKey = BuildConfig.GROQ_API_KEY
+        if (isOnline) {
+            // 3a. For non-image queries, also fetch web context for citations
+            if (image == null) {
+                retrieval = retrievalClient.fetchOnlineContext(
+                    searchQuery,
+                    BuildConfig.OPENROUTER_API_KEY,
+                    BuildConfig.GROQ_API_KEY
                 )
-                if (!onlineAnswer.isNullOrBlank()) {
-                    rawAnswer = onlineAnswer
-                }
+            }
+            // 3b. Try online generation first (Groq/OpenRouter LLM)
+            val onlineAnswer = retrievalClient.generateOnlineExplanation(
+                prompt = if (retrieval.factsText.isNotBlank()) {
+                    "$prompt\n\nWeb Context:\n${retrieval.factsText}"
+                } else {
+                    prompt
+                },
+                openRouterKey = BuildConfig.OPENROUTER_API_KEY,
+                groqKey = BuildConfig.GROQ_API_KEY
+            )
+            if (!onlineAnswer.isNullOrBlank()) {
+                rawAnswer = onlineAnswer
+                usedOnline = true
+                Log.i(TAG, "answerFollowUp: used online generation (${rawAnswer.length} chars)")
+            }
+        }
+
+        // 4. Fallback to on-device multimodal LLM (with image if present)
+        if (rawAnswer.isBlank()) {
+            val onDeviceAnswer = llmEngine.generateResponse(prompt, image)
+            val isFailedAnswer = onDeviceAnswer.isBlank() ||
+                    onDeviceAnswer.startsWith("Sorry,", ignoreCase = true) ||
+                    onDeviceAnswer.contains("couldn't generate an explanation", ignoreCase = true) ||
+                    onDeviceAnswer.contains("taking longer than expected", ignoreCase = true) ||
+                    onDeviceAnswer.contains("model isn't loaded", ignoreCase = true) ||
+                    isTrivialOrEcho(onDeviceAnswer, question)
+
+            rawAnswer = if (!isFailedAnswer) {
+                onDeviceAnswer
             } else if (retrieval.factsText.isNotBlank()) {
-                rawAnswer = retrieval.factsText
+                retrieval.factsText
             } else {
-                rawAnswer = generateFallbackExplanation(searchQuery)
+                generateFallbackExplanation(searchQuery)
             }
         }
 
@@ -340,7 +366,7 @@ class ExplainPipeline(
         return ExplanationResult(
             captureId = capture.id,
             finalExplanation = structured.coreConcept,
-            usedOnlineContext = retrieval.factsText.isNotBlank(),
+            usedOnlineContext = usedOnline,
             structuredResponse = structured,
             citations = retrieval.citations
         )
