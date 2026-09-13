@@ -9,6 +9,11 @@ import org.json.JSONObject
  * from the JSON as a separate manual flag.
  * `isMultimodal` dictates whether image uploads are supported.
  */
+enum class ModelProfile {
+    STANDARD,
+    COMPACT
+}
+
 data class DownloadableModel(
     val id: String,
     val displayName: String,
@@ -27,7 +32,9 @@ data class DownloadableModel(
     // Drives whether the chat UI offers image upload for the active model - text-only
     // models (none currently in the catalog, but the field stays for when one works) should
     // hide that entry point rather than let the user attach a photo the model can't read.
-    val isMultimodal: Boolean = true
+    val isMultimodal: Boolean = true,
+    val maxTokens: Int = 1536,
+    val profile: ModelProfile = ModelProfile.STANDARD
 )
 
 object ModelCatalog {
@@ -42,6 +49,8 @@ object ModelCatalog {
             (0 until arr.length()).map { i ->
                 val o = arr.getJSONObject(i)
                 val url = o.getString("downloadUrl")
+                val profileStr = o.optString("profile", "STANDARD").uppercase()
+                val profile = try { ModelProfile.valueOf(profileStr) } catch (e: Exception) { ModelProfile.STANDARD }
                 DownloadableModel(
                     id = o.getString("id"),
                     displayName = o.getString("displayName"),
@@ -51,7 +60,9 @@ object ModelCatalog {
                     downloadUrl = url,
                     available = !url.contains(PLACEHOLDER_MARKER, ignoreCase = true),
                     knownIncompatible = o.optBoolean("knownIncompatible", false),
-                    isMultimodal = o.optBoolean("isMultimodal", true)
+                    isMultimodal = o.optBoolean("isMultimodal", true),
+                    maxTokens = o.optInt("maxTokens", 1536),
+                    profile = profile
                 )
             }
         } catch (e: Exception) {

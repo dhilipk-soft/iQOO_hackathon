@@ -75,6 +75,8 @@ class ModelDownloadManager(private val context: Context) {
             .putString(KEY_ACTIVE_FILENAME, model.filename)
             .putString(KEY_ACTIVE_DISPLAY_NAME, model.displayName)
             .putBoolean(KEY_ACTIVE_IS_MULTIMODAL, model.isMultimodal)
+            .putInt(KEY_ACTIVE_MAX_TOKENS, model.maxTokens)
+            .putString(KEY_ACTIVE_PROFILE, model.profile.name)
             .apply()
     }
 
@@ -86,6 +88,8 @@ class ModelDownloadManager(private val context: Context) {
             .edit()
             .putString(KEY_ACTIVE_FILENAME, DEFAULT_MODEL_FILENAME)
             .putString(KEY_ACTIVE_DISPLAY_NAME, DEFAULT_MODEL_DISPLAY_NAME)
+            .putInt(KEY_ACTIVE_MAX_TOKENS, DEFAULT_MODEL_MAX_TOKENS)
+            .putString(KEY_ACTIVE_PROFILE, DEFAULT_MODEL_PROFILE.name)
             .apply()
     }
 
@@ -109,9 +113,13 @@ class ModelDownloadManager(private val context: Context) {
         private const val KEY_ACTIVE_FILENAME = "active_model_filename"
         private const val KEY_ACTIVE_DISPLAY_NAME = "active_model_display_name"
         private const val KEY_ACTIVE_IS_MULTIMODAL = "active_model_is_multimodal"
+        private const val KEY_ACTIVE_MAX_TOKENS = "active_model_max_tokens"
+        private const val KEY_ACTIVE_PROFILE = "active_model_profile"
 
         const val DEFAULT_MODEL_FILENAME = "Qwen2-VL-2B.litertlm"
         private const val DEFAULT_MODEL_DISPLAY_NAME = "Qwen2-VL 2B (multimodal, default)"
+        private const val DEFAULT_MODEL_MAX_TOKENS = 2048
+        private val DEFAULT_MODEL_PROFILE = ModelProfile.STANDARD
 
         fun getActiveModelFilename(context: Context): String {
             return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -126,6 +134,17 @@ class ModelDownloadManager(private val context: Context) {
         fun getActiveModelIsMultimodal(context: Context): Boolean {
             return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
                 .getBoolean(KEY_ACTIVE_IS_MULTIMODAL, true)
+        }
+
+        fun getActiveModelMaxTokens(context: Context): Int {
+            return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .getInt(KEY_ACTIVE_MAX_TOKENS, DEFAULT_MODEL_MAX_TOKENS)
+        }
+
+        fun getActiveModelProfile(context: Context): ModelProfile {
+            val name = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .getString(KEY_ACTIVE_PROFILE, DEFAULT_MODEL_PROFILE.name) ?: DEFAULT_MODEL_PROFILE.name
+            return try { ModelProfile.valueOf(name) } catch (e: Exception) { DEFAULT_MODEL_PROFILE }
         }
     }
 }

@@ -959,6 +959,11 @@ fun EmptyStudyCanvas(
             modifier = Modifier
                 .padding(bottom = 90.dp)
         ) {
+            PromptActionChip(
+                icon = "✨",
+                text = "Summarize current study conversation",
+                onClick = { onPromptClick("Summarize conversation") }
+            )
             if (isMultimodalSupported) {
                 PromptActionChip(
                     icon = "📷",
@@ -1223,6 +1228,10 @@ fun FollowUpCard(
     onToggleLike: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val isSummary = message.question.contains("summarize", ignoreCase = true) ||
+            message.question.contains("summary", ignoreCase = true) ||
+            message.question.contains("recap", ignoreCase = true)
+
     Column(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -1234,9 +1243,12 @@ fun FollowUpCard(
         ) {
             Surface(
                 shape = RoundedCornerShape(topStart = 16.dp, topEnd = 4.dp, bottomStart = 16.dp, bottomEnd = 16.dp),
-                color = Color(0xFFEEF2FF),
+                color = if (isSummary) Color(0xFFEEF2FF) else Color(0xFFF1F5F9),
                 border = ButtonDefaults.outlinedButtonBorder.copy(
-                    brush = Brush.horizontalGradient(listOf(Color(0xFFC7D2FE), Color(0xFFA5B4FC)))
+                    brush = Brush.horizontalGradient(
+                        if (isSummary) listOf(Color(0xFF818CF8), Color(0xFF4F46E5))
+                        else listOf(Color(0xFFCBD5E1), Color(0xFFE2E8F0))
+                    )
                 )
             ) {
                 Text(
@@ -1256,26 +1268,28 @@ fun FollowUpCard(
             shape = RoundedCornerShape(18.dp),
             border = ButtonDefaults.outlinedButtonBorder.copy(
                 brush = Brush.horizontalGradient(
-                    listOf(Color(0xFFE2E8F0), Color(0xFFEEF2FF))
+                    if (isSummary) listOf(Color(0xFF818CF8), Color(0xFF4F46E5))
+                    else listOf(Color(0xFFE2E8F0), Color(0xFFEEF2FF))
                 ),
-                width = 1.dp
+                width = if (isSummary) 1.5.dp else 1.dp
             ),
-            shadowElevation = 1.dp
+            shadowElevation = if (isSummary) 3.dp else 1.dp
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Surface(
                     shape = RoundedCornerShape(10.dp),
-                    color = if (message.usedOnlineContext) Color(0xFFEEF2FF) else Color(0xFFECFDF5),
+                    color = if (isSummary) Color(0xFFEEF2FF) else if (message.usedOnlineContext) Color(0xFFEEF2FF) else Color(0xFFECFDF5),
                     border = ButtonDefaults.outlinedButtonBorder.copy(
                         brush = Brush.horizontalGradient(
-                            if (message.usedOnlineContext) listOf(Color(0xFFC7D2FE), Color(0xFFA5B4FC))
+                            if (isSummary) listOf(Color(0xFF818CF8), Color(0xFF4F46E5))
+                            else if (message.usedOnlineContext) listOf(Color(0xFFC7D2FE), Color(0xFFA5B4FC))
                             else listOf(Color(0xFFA7F3D0), Color(0xFF6EE7B7))
                         )
                     )
                 ) {
                     Text(
-                        text = if (message.usedOnlineContext) "📡 Enhanced with live info" else "📴 Offline answer",
-                        color = if (message.usedOnlineContext) Color(0xFF4F46E5) else Color(0xFF059669),
+                        text = if (isSummary) "📌 Executive Summary" else if (message.usedOnlineContext) "📡 Enhanced with live info" else "📴 Offline answer",
+                        color = if (isSummary) Color(0xFF4F46E5) else if (message.usedOnlineContext) Color(0xFF4F46E5) else Color(0xFF059669),
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)

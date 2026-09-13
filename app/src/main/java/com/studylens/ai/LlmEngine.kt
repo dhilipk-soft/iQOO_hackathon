@@ -2,6 +2,7 @@ package com.studylens.ai
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.util.Log
 import com.google.ai.edge.litertlm.Backend
 import com.google.ai.edge.litertlm.Content
 import com.google.ai.edge.litertlm.Contents
@@ -38,6 +39,9 @@ import kotlin.coroutines.resume
  * existing callers (ExplainPipeline, QuizGenerator) don't need to change.
  */
 class LlmEngine(private val context: Context) {
+
+    fun getActiveProfile(): ModelProfile = ModelDownloadManager.getActiveModelProfile(context)
+    fun getActiveMaxTokens(): Int = ModelDownloadManager.getActiveModelMaxTokens(context)
 
     /**
      * Engine.createConversation() unconditionally requires a vision encoder section in the
@@ -93,6 +97,14 @@ class LlmEngine(private val context: Context) {
         }
     }
 
+    /**
+     * Resets the active conversation session.
+     * Clears KV-cache and conversation context to 0 tokens for a fresh chat or summary.
+     */
+    fun resetSession() {
+        invalidate()
+    }
+
     // NPU deliberately left out: this build has no Qualcomm QNN/QAIRT dispatch library or
     // compiler plugin bundled (confirmed via logcat - "No dispatch library found", "No
     // compiler plugin found"), and the downloaded models carry no TF_LITE_AUX NPU section
@@ -127,6 +139,8 @@ class LlmEngine(private val context: Context) {
             }
             engine?.close()
 
+            val maxTokens = ModelDownloadManager.getActiveModelMaxTokens(context)
+
             var lastError: Exception? = null
             for ((name, backend) in backendsToTry()) {
                 try {
@@ -144,7 +158,7 @@ class LlmEngine(private val context: Context) {
                         // "Must be GPU for Gemma 3n" (Google's own comment) doesn't apply here -
                         // this app uses Qwen2-VL-2B, not Gemma 3n.
                         visionBackend = Backend.CPU(),
-                        maxNumTokens = 1536
+                        maxNumTokens = maxTokens
                     )
                     val newEngine = Engine(config)
                     newEngine.initialize()
@@ -242,7 +256,7 @@ class LlmEngine(private val context: Context) {
                 is ChatHandle.ViaSession -> generateViaSession(handle.session, prompt, image)
             }
         } catch (e: Exception) {
-            "Sorry, I couldn't generate an explanation just now. Please try again."
+            "Sorry, I couldn't generate an explanation just now. Please try again1."
         }
     }
 
@@ -266,7 +280,11 @@ class LlmEngine(private val context: Context) {
                     Contents.of(contents),
                     object : MessageCallback {
                         override fun onMessage(message: Message) {
-                            response.append(message.toString())
+                            message.contents.contents.forEach { content ->
+                                if (content is Content.Text) {
+                                    response.append(content.text)
+                                }
+                            }
                         }
 
                         override fun onDone() {
@@ -274,8 +292,9 @@ class LlmEngine(private val context: Context) {
                         }
 
                         override fun onError(throwable: Throwable) {
+                            Log.e("LlmEngine", "sendMessageAsync error: ${throwable.message}", throwable)
                             if (cont.isActive) {
-                                cont.resume("Sorry, I couldn't generate an explanation just now. Please try again.")
+                                cont.resume("Sorry, I couldn't generate an explanation just now. Please try again.2")
                             }
                         }
                     },
@@ -321,7 +340,7 @@ class LlmEngine(private val context: Context) {
                 }
             }
         } catch (e: Exception) {
-            "Sorry, I couldn't generate an explanation just now. Please try again."
+            "Sorry, I couldn't generate an explanation just now. Please try again3s."
         }
     }
 
