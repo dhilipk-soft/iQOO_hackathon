@@ -58,13 +58,17 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import com.studylens.shared.ExplanationResult
 import com.studylens.shared.InferenceStats
+import com.studylens.shared.StudyIntent
 import com.studylens.ui.FollowUpMessage
 import com.studylens.ui.StudyTopicSession
 import java.io.File
@@ -92,6 +96,8 @@ fun StudyChatScreen(
     onTakeQuiz: () -> Unit,
     onToggleSimulatedNetwork: () -> Unit,
     onExplainImage: (Bitmap, String) -> Unit = { _, _ -> },
+    selectedIntent: StudyIntent = StudyIntent.AUTO,
+    onSelectIntent: (StudyIntent) -> Unit = {},
     isFocusModeActive: Boolean = false,
     onToggleFocusMode: () -> Unit = {},
     onTriggerIntentToSwitch: () -> Unit = {},
@@ -110,6 +116,7 @@ fun StudyChatScreen(
     var inputText by remember { mutableStateOf("") }
     var showMediaSheet by remember { mutableStateOf(false) }
     var likedCards by remember { mutableStateOf(setOf<String>()) }
+    var viewingImage by remember { mutableStateOf<Bitmap?>(null) }
     val listState = rememberLazyListState()
 
     // Media attachment state - no OCR anymore, the model reads the photo directly.
@@ -438,21 +445,11 @@ fun StudyChatScreen(
                                 )
                             }
                             Spacer(modifier = Modifier.height(6.dp))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text(
-                                    text = "Speed: ${vitals.tokensPerSecond} t/s",
-                                    color = Color(0xFF64748B),
-                                    fontSize = 11.sp
-                                )
-                                Text(
-                                    text = "RAM: ${vitals.ramUsedMb} MB",
-                                    color = Color(0xFF64748B),
-                                    fontSize = 11.sp
-                                )
-                            }
+                            Text(
+                                text = "Speed: ${vitals.tokensPerSecond} t/s",
+                                color = Color(0xFF64748B),
+                                fontSize = 11.sp
+                            )
                         }
                     }
 
@@ -497,13 +494,17 @@ fun StudyChatScreen(
                                 HamburgerIcon(tint = Color(0xFF1E1B4B))
                             }
 
-                            // Center: Title
+                            // Center: Title - weight(fill=false) lets it shrink for a long
+                            // session title instead of squeezing the badge next to it into
+                            // wrapping onto two lines ("Onlin" / "e").
                             Text(
                                 text = activeSession?.title ?: "StudyLens",
                                 color = Color(0xFF1E1B4B),
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.Bold,
-                                maxLines = 1
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false).padding(horizontal = 8.dp)
                             )
 
                             // Right: Offline status badge (clickable to toggle simulation)
@@ -527,7 +528,9 @@ fun StudyChatScreen(
                                         text = if (isOnline) "📡 Online" else "📴 Offline answer",
                                         color = if (isOnline) Color(0xFF4F46E5) else Color(0xFF059669),
                                         fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        softWrap = false
                                     )
                                 }
                             }
@@ -680,17 +683,21 @@ fun StudyChatScreen(
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(horizontal = 16.dp),
-                        contentPadding = PaddingValues(top = 12.dp, bottom = 120.dp),
+                        // bottom accounts for the pinned dock: attachment banner (conditional)
+                        // + IntentSelectorStrip (~44dp incl. its own bottom margin) + input bar
+                        // + dock padding - without the extra room, the dock (which grew when
+                        // IntentSelectorStrip was added) overlaps the last card's content.
+                        contentPadding = PaddingValues(top = 12.dp, bottom = 230.dp),
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        // Topic Explanation Card (Screen 3)
+                        // Structured Topic Explanation Card
                         item {
-                            StudyExplanationCard(
-                                title = activeSession?.title ?: "Study Explanation",
-                                explanation = explanationResult?.finalExplanation ?: activeSession?.explanation ?: "",
-                                formula = activeSession?.formula,
-                                bulletPoints = activeSession?.bulletPoints ?: emptyList(),
+                            StructuredExplanationCard(
+                                response = explanationResult?.structuredResponse ?: activeSession?.structuredResponse,
+                                fallbackTitle = activeSession?.title ?: "Study Explanation",
+                                fallbackExplanation = explanationResult?.finalExplanation ?: activeSession?.explanation ?: "",
                                 usedOnlineContext = explanationResult?.usedOnlineContext ?: activeSession?.usedOnlineContext ?: false,
+                                citations = explanationResult?.citations?.ifEmpty { null } ?: activeSession?.citations ?: emptyList(),
                                 isSpeaking = isSpeaking,
                                 onSpeak = { onSpeakText(explanationResult?.finalExplanation ?: activeSession?.explanation ?: "") },
                                 onStopSpeak = onStopSpeaking,
@@ -702,13 +709,15 @@ fun StudyChatScreen(
                                     } else {
                                         likedCards + "main_explanation"
                                     }
-                                }
+                                },
+                                attachedImage = activeSession?.image,
+                                onImageClick = { viewingImage = it }
                             )
                         }
 
-                        // Follow-up Q&A List (Screen 4)
+                        // Structured Follow-up Q&A List
                         items(followUpList) { followUp ->
-                            FollowUpCard(
+                            StructuredFollowUpCard(
                                 message = followUp,
                                 isLiked = likedCards.contains(followUp.id),
                                 onToggleLike = {
@@ -717,7 +726,8 @@ fun StudyChatScreen(
                                     } else {
                                         likedCards + followUp.id
                                     }
-                                }
+                                },
+                                onImageClick = { viewingImage = it }
                             )
                         }
 
@@ -753,100 +763,121 @@ fun StudyChatScreen(
                     }
                 }
 
-                // Bottom Area: Attached Image Chip + Bottom Pill Input Bar
-                Column(
+                // Bottom Dock Container (ChatGPT Floating Style with top gradient fade)
+                Box(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 10.dp)
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(
+                                    Color.Transparent,
+                                    Color(0xFFF8F9FE).copy(alpha = 0.92f),
+                                    Color(0xFFF8F9FE),
+                                    Color(0xFFF8F9FE)
+                                )
+                            )
+                        )
+                        .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 10.dp)
                 ) {
-                    // Attachment & Photo Preview Banner
-                    AnimatedVisibility(visible = stagedImage != null || isProcessingOcr) {
-                        Surface(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(bottom = 6.dp),
-                            shape = RoundedCornerShape(16.dp),
-                            color = Color.White,
-                            border = ButtonDefaults.outlinedButtonBorder.copy(
-                                brush = Brush.horizontalGradient(listOf(Color(0xFF818CF8), Color(0xFF4F46E5))),
-                                width = 1.dp
-                            ),
-                            shadowElevation = 2.dp
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                    Column(
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        // Attachment & Photo Preview Banner
+                        AnimatedVisibility(visible = stagedImage != null || isProcessingOcr) {
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 6.dp),
+                                shape = RoundedCornerShape(16.dp),
+                                color = Color.White,
+                                border = ButtonDefaults.outlinedButtonBorder.copy(
+                                    brush = Brush.horizontalGradient(listOf(Color(0xFF818CF8), Color(0xFF4F46E5))),
+                                    width = 1.dp
+                                ),
+                                shadowElevation = 2.dp
                             ) {
-                                if (isProcessingOcr) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(16.dp).padding(start = 4.dp),
-                                        color = Color(0xFF4F46E5),
-                                        strokeWidth = 2.dp
-                                    )
-                                    Spacer(modifier = Modifier.width(10.dp))
-                                    Text(
-                                        text = ocrStatusText,
-                                        color = Color(0xFF4F46E5),
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                } else {
-                                    stagedImage?.let { bmp ->
-                                        Image(
-                                            bitmap = bmp.asImageBitmap(),
-                                            contentDescription = "Attached photo",
-                                            contentScale = ContentScale.Crop,
-                                            modifier = Modifier
-                                                .size(40.dp)
-                                                .clip(RoundedCornerShape(8.dp))
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    if (isProcessingOcr) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(16.dp).padding(start = 4.dp),
+                                            color = Color(0xFF4F46E5),
+                                            strokeWidth = 2.dp
                                         )
-                                    }
-                                    Spacer(modifier = Modifier.width(10.dp))
-                                    Text(
-                                        text = "Photo attached • type a question below, or just send",
-                                        color = Color(0xFF1E1B4B),
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    IconButton(
-                                        onClick = { stagedImage = null },
-                                        modifier = Modifier.size(24.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Close,
-                                            contentDescription = "Remove",
-                                            tint = Color(0xFF94A3B8),
-                                            modifier = Modifier.size(16.dp)
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Text(
+                                            text = ocrStatusText,
+                                            color = Color(0xFF4F46E5),
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Medium
                                         )
+                                    } else {
+                                        stagedImage?.let { bmp ->
+                                            Image(
+                                                bitmap = bmp.asImageBitmap(),
+                                                contentDescription = "Attached photo",
+                                                contentScale = ContentScale.Crop,
+                                                modifier = Modifier
+                                                    .size(40.dp)
+                                                    .clip(RoundedCornerShape(8.dp))
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Text(
+                                            text = "Photo attached • type a question below, or just send",
+                                            color = Color(0xFF1E1B4B),
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        IconButton(
+                                            onClick = { stagedImage = null },
+                                            modifier = Modifier.size(24.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Close,
+                                                contentDescription = "Remove",
+                                                tint = Color(0xFF94A3B8),
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
                                     }
                                 }
                             }
                         }
-                    }
 
-                    // Bottom Pill Input Bar (Reference Image 2 ChatGPT Style)
-                    BottomStudyInputBar(
-                        inputText = inputText,
-                        onTextChange = { inputText = it },
-                        onSend = {
-                            val photo = stagedImage
-                            if (photo != null) {
-                                onExplainImage(photo, inputText.trim())
-                                stagedImage = null
-                                inputText = ""
-                            } else if (inputText.isNotBlank()) {
-                                onAskQuestion(inputText)
-                                inputText = ""
-                            }
-                        },
-                        onOpenPlus = { showMediaSheet = true },
-                        onVoiceTap = {
-                            inputText = "What is the discriminant formula?"
-                        },
-                        isMultimodalSupported = isMultimodalSupported
-                    )
+                        // Pedagogical Intent Selector Bar (ChatGPT Mobile Style)
+                        IntentSelectorStrip(
+                            selectedIntent = selectedIntent,
+                            onSelectIntent = onSelectIntent,
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        )
+
+                        // Bottom Pill Input Bar (Reference Image 2 ChatGPT Style)
+                        BottomStudyInputBar(
+                            inputText = inputText,
+                            onTextChange = { inputText = it },
+                            onSend = {
+                                val photo = stagedImage
+                                if (photo != null) {
+                                    onExplainImage(photo, inputText.trim())
+                                    stagedImage = null
+                                    inputText = ""
+                                } else if (inputText.isNotBlank()) {
+                                    onAskQuestion(inputText)
+                                    inputText = ""
+                                }
+                            },
+                            onOpenPlus = { showMediaSheet = true },
+                            onVoiceTap = {
+                                inputText = "What is the discriminant formula?"
+                            },
+                            isMultimodalSupported = isMultimodalSupported
+                        )
+                    }
                 }
 
                 // Media / Photos Bottom Sheet (Camera & Gallery Options)
@@ -873,6 +904,50 @@ fun StudyChatScreen(
                             onDismiss = { showMediaSheet = false }
                         )
                     }
+                }
+            }
+        }
+    }
+
+    // ChatGPT-Style Full-Screen Clickable Image Viewer Modal
+    viewingImage?.let { bmp ->
+        Dialog(
+            onDismissRequest = { viewingImage = null },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.94f))
+                    .clickable { viewingImage = null },
+                contentAlignment = Alignment.Center
+            ) {
+                Image(
+                    bitmap = bmp.asImageBitmap(),
+                    contentDescription = "Full uploaded image",
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp)
+                        .clickable(enabled = false) {}
+                )
+
+                // Floating Top-Right Close Button
+                IconButton(
+                    onClick = { viewingImage = null },
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .statusBarsPadding()
+                        .padding(16.dp)
+                        .size(44.dp)
+                        .background(Color.White.copy(alpha = 0.25f), CircleShape)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Close",
+                        tint = Color.White,
+                        modifier = Modifier.size(24.dp)
+                    )
                 }
             }
         }
@@ -957,7 +1032,7 @@ fun EmptyStudyCanvas(
         Column(
             verticalArrangement = Arrangement.spacedBy(10.dp),
             modifier = Modifier
-                .padding(bottom = 90.dp)
+                .padding(bottom = 165.dp)
         ) {
             PromptActionChip(
                 icon = "✨",
@@ -983,9 +1058,9 @@ fun EmptyStudyCanvas(
                 onClick = { onPromptClick("Explain Quadratic Equation and how to solve it") }
             )
             PromptActionChip(
-                icon = "📝",
-                text = "Take a practice quiz on algebra",
-                onClick = { onPromptClick("Give me a quick practice quiz") }
+                icon = "⚡",
+                text = "Compare FastAPI vs Node.js vs Django",
+                onClick = { onPromptClick("Compare FastAPI, Node.js, and Django with key differences") }
             )
         }
     }
@@ -1195,26 +1270,6 @@ fun StudyExplanationCard(
                             modifier = Modifier.size(18.dp)
                         )
                     }
-                }
-
-                // Take Practice Quiz Button
-                TextButton(
-                    onClick = onTakeQuiz,
-                    colors = ButtonDefaults.textButtonColors(
-                        contentColor = Color(0xFF4F46E5)
-                    )
-                ) {
-                    Text(
-                        text = "Take Practice Quiz",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 13.sp
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp)
-                    )
                 }
             }
         }

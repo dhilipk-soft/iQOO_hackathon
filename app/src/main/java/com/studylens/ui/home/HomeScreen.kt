@@ -54,7 +54,7 @@ fun HomeScreen(
         ValuePropItem("Scan any textbook page or problem", IconType.SCAN_BOOK),
         ValuePropItem("Get simple explanations", IconType.LIGHTBULB),
         ValuePropItem("Ask follow-up questions", IconType.CHAT_QUESTION),
-        ValuePropItem("Take a quick quiz", IconType.QUIZ_CHECK),
+        ValuePropItem("Practice key concepts and review", IconType.LIGHTBULB),
         ValuePropItem("Stay focused with insights", IconType.FOCUS_TARGET)
     )
 

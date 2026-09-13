@@ -7,6 +7,7 @@ import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.Body
 import retrofit2.http.Header
 import retrofit2.http.POST
+import com.studylens.shared.VerifiedCitation
 
 private const val TAG = "RetrievalClient"
 
@@ -44,11 +45,35 @@ interface GroqApi {
     ): HashMap<String, Any>
 }
 
-data class WebCitation(val title: String, val url: String)
+typealias WebCitation = VerifiedCitation
+
+fun extractCleanDomain(url: String): Pair<String, Boolean> {
+    val cleanUrl = url.removePrefix("https://").removePrefix("http://").removePrefix("www.")
+    val host = cleanUrl.split("/").firstOrNull()?.split(":")?.firstOrNull()?.lowercase() ?: "Web Source"
+    val isEducational = host.endsWith(".edu") || host.contains("khanacademy") ||
+            host.contains("wikipedia") || host.contains("britannica") ||
+            host.contains("nature.com") || host.contains("sciencedirect") ||
+            host.contains("arxiv") || host.contains("mit.edu") || host.contains("stanford.edu") ||
+            host.contains("geeksforgeeks") || host.contains("coursera") || host.contains("edx.org")
+
+    val displayName = when {
+        host.contains("wikipedia.org") -> "Wikipedia"
+        host.contains("khanacademy.org") -> "Khan Academy"
+        host.contains("britannica.com") -> "Encyclopaedia Britannica"
+        host.contains("nature.com") -> "Nature Journal"
+        host.contains("sciencedirect.com") -> "ScienceDirect"
+        host.contains("arxiv.org") -> "arXiv Research"
+        host.contains("mit.edu") -> "MIT OpenCourseWare"
+        host.contains("stanford.edu") -> "Stanford Edu"
+        host.contains("geeksforgeeks.org") -> "GeeksforGeeks"
+        else -> host.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
+    }
+    return Pair(displayName, isEducational)
+}
 
 data class RetrievalResult(
     val factsText: String,
-    val citations: List<WebCitation> = emptyList()
+    val citations: List<VerifiedCitation> = emptyList()
 )
 
 /**
@@ -80,12 +105,102 @@ class RetrievalClient {
 
     suspend fun fetchOnlineContext(topic: String, openRouterKey: String, groqKey: String): RetrievalResult {
         val groqResult = fetchGroqContext(topic, groqKey)
-        if (groqResult != null && groqResult.factsText.isNotBlank()) {
-            Log.i(TAG, "Groq succeeded, using its result (${groqResult.factsText.length} chars)")
-            return groqResult
+        val baseResult = if (groqResult != null && groqResult.factsText.isNotBlank()) {
+            Log.i(TAG, "Groq succeeded (${groqResult.factsText.length} chars, ${groqResult.citations.size} citations)")
+            if (groqResult.citations.isNotEmpty()) {
+                groqResult
+            } else {
+                val openRouterResult = fetchOpenRouterContext(topic, openRouterKey)
+                if (openRouterResult.citations.isNotEmpty()) {
+                    RetrievalResult(groqResult.factsText, openRouterResult.citations)
+                } else {
+                    groqResult
+                }
+            }
+        } else {
+            Log.i(TAG, "Groq gave nothing usable, falling back to OpenRouter")
+            fetchOpenRouterContext(topic, openRouterKey)
         }
-        Log.i(TAG, "Groq gave nothing usable, falling back to OpenRouter")
-        return fetchOpenRouterContext(topic, openRouterKey)
+
+        // Only return citations that were actually retrieved from web sources.
+        // Never fabricate default citations - an empty list is better than fake references.
+        return baseResult
+    }
+
+    suspend fun generateOnlineExplanation(
+        prompt: String,
+        openRouterKey: String,
+        groqKey: String
+    ): String? {
+        if (groqKey.isNotBlank()) {
+            try {
+                val groqResp = withTimeoutOrNull(7000L) {
+                    groqApi.queryOnlineContext(
+                        apiKey = "Bearer $groqKey",
+                        request = hashMapOf(
+                            "model" to "openai/gpt-oss-20b",
+                            "temperature" to 0.3,
+                            "max_tokens" to 1200,
+                            "messages" to listOf(
+                                mapOf(
+                                    "role" to "system",
+                                    "content" to "You are an expert tutor in StudyLens. Provide a clear, comprehensive educational explanation using the requested tags: [INTENT], [TITLE], [SUBJECT], ### 🎯 CORE PRINCIPLE, ### 📐 FORMULA & GIVEN, ### 🔍 STEP-BY-STEP BREAKDOWN, ### 💡 REAL-WORLD ANALOGY, ### ⚠️ COMMON PITFALLS, ### ❓ CHECK YOUR UNDERSTANDING. For coding tasks, provide complete working code with edge cases handled."
+                                ),
+                                mapOf("role" to "user", "content" to prompt)
+                            )
+                        )
+                    )
+                }
+                @Suppress("UNCHECKED_CAST")
+                val choices = groqResp?.get("choices") as? List<Map<String, Any>>
+                val message = choices?.firstOrNull()?.get("message") as? Map<String, Any>
+                val content = message?.get("content") as? String
+                if (!content.isNullOrBlank()) {
+                    Log.i(TAG, "Groq online explanation succeeded (${content.length} chars)")
+                    return content
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Groq online generation failed: ${e.message}")
+            }
+        }
+
+        if (openRouterKey.isNotBlank()) {
+            try {
+                val openRouterResp = withTimeoutOrNull(8000L) {
+                    openRouterApi.queryOnlineContext(
+                        apiKey = "Bearer $openRouterKey",
+                        request = hashMapOf(
+                            "model" to "perplexity/sonar",
+                            "temperature" to 0.3,
+                            "max_tokens" to 1000,
+                            "messages" to listOf(
+                                mapOf(
+                                    "role" to "system",
+                                    "content" to "You are an expert educational tutor in StudyLens."
+                                ),
+                                mapOf("role" to "user", "content" to prompt)
+                            )
+                        )
+                    )
+                }
+                @Suppress("UNCHECKED_CAST")
+                val choices = openRouterResp?.get("choices") as? List<Map<String, Any>>
+                val message = choices?.firstOrNull()?.get("message") as? Map<String, Any>
+                val content = message?.get("content") as? String
+                if (!content.isNullOrBlank()) {
+                    Log.i(TAG, "OpenRouter online explanation succeeded (${content.length} chars)")
+                    return stripInlineCitationMarkers(content)
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "OpenRouter online generation failed: ${e.message}")
+            }
+        }
+
+        return null
+    }
+
+    companion object {
+        // No default citation fabrication - only real retrieved citations are used.
     }
 
     private suspend fun fetchGroqContext(topic: String, apiKey: String): RetrievalResult? {
@@ -170,9 +285,12 @@ class RetrievalClient {
         val citations = annotations.mapNotNull { annotation ->
             val urlCitation = annotation["url_citation"] as? Map<String, Any> ?: return@mapNotNull null
             val url = urlCitation["url"] as? String ?: return@mapNotNull null
-            val title = (urlCitation["title"] as? String)?.takeIf { it.isNotBlank() } ?: url
-            WebCitation(title, url)
-        }.distinctBy { it.url }
+            if (!url.startsWith("http")) return@mapNotNull null
+            val (domain, isEdu) = extractCleanDomain(url)
+            val title = (urlCitation["title"] as? String)?.takeIf { it.isNotBlank() } ?: domain
+            VerifiedCitation(title = title, url = url, domain = domain, isEducational = isEdu)
+        }.distinctBy { it.domain }
+         .take(3)
 
         return RetrievalResult(stripInlineCitationMarkers(content), citations)
     }
@@ -203,10 +321,13 @@ class RetrievalClient {
                     ?: emptyList()
                 results.mapNotNull { result ->
                     val url = result["url"] as? String ?: return@mapNotNull null
-                    val title = (result["title"] as? String)?.takeIf { it.isNotBlank() } ?: url
-                    WebCitation(title, url)
+                    if (!url.startsWith("http")) return@mapNotNull null
+                    val (domain, isEdu) = extractCleanDomain(url)
+                    val title = (result["title"] as? String)?.takeIf { it.isNotBlank() } ?: domain
+                    VerifiedCitation(title = title, url = url, domain = domain, isEducational = isEdu)
                 }
-            }.distinctBy { it.url }
+            }.distinctBy { it.domain }
+             .take(3)
         } catch (e: Exception) {
             emptyList()
         }

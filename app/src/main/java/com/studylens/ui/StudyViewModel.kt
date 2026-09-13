@@ -2,6 +2,7 @@ package com.studylens.ui
 
 import android.app.Application
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.studylens.ai.ExplainPipeline
@@ -43,13 +44,24 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import com.studylens.ai.StructuredStudyResponseParser
+import com.studylens.ai.StudyIntentClassifier
+import com.studylens.shared.FormulaCodeBlock
+import com.studylens.shared.StructuredStudyResponse
+import com.studylens.shared.StudyIntent
+import java.io.File
+import java.io.FileOutputStream
+import com.studylens.shared.VerifiedCitation
 
 data class FollowUpMessage(
     val id: String,
     val question: String,
     val answer: String,
     val usedOnlineContext: Boolean = false,
-    val timestamp: Long = System.currentTimeMillis()
+    val timestamp: Long = System.currentTimeMillis(),
+    val structuredResponse: StructuredStudyResponse? = null,
+    val citations: List<VerifiedCitation> = emptyList(),
+    val image: Bitmap? = null
 )
 
 data class StudyTopicSession(
@@ -61,7 +73,10 @@ data class StudyTopicSession(
     val formula: String? = null,
     val bulletPoints: List<String> = emptyList(),
     val usedOnlineContext: Boolean = false,
-    val followUps: List<FollowUpMessage> = emptyList()
+    val followUps: List<FollowUpMessage> = emptyList(),
+    val structuredResponse: StructuredStudyResponse? = null,
+    val citations: List<VerifiedCitation> = emptyList(),
+    val image: Bitmap? = null
 )
 
 private const val SESSION_ID_PREFIX = "session_"
@@ -81,6 +96,34 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
 
     private val database = AppDatabase.getDatabase(application)
     private val chatDao = database.chatDao()
+
+    /** Save a Bitmap to internal storage and return its file path. Returns null if bitmap is null or save fails. */
+    private fun saveBitmapToFile(bitmap: Bitmap?, prefix: String = "img"): String? {
+        if (bitmap == null) return null
+        return try {
+            val dir = File(getApplication<Application>().filesDir, "chat_images")
+            dir.mkdirs()
+            val file = File(dir, "${prefix}_${System.currentTimeMillis()}.jpg")
+            FileOutputStream(file).use { out ->
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 85, out)
+            }
+            file.absolutePath
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /** Load a Bitmap from a stored file path. Returns null if path is null or file doesn't exist. */
+    private fun loadBitmapFromPath(path: String?): Bitmap? {
+        if (path == null) return null
+        return try {
+            val file = File(path)
+            if (file.exists()) BitmapFactory.decodeFile(file.absolutePath) else null
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     val usageCollector = try {
         com.studylens.StudyLensApp.instance.usageCollector
     } catch (e: Exception) {
@@ -148,6 +191,14 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
     private val _isExplaining = MutableStateFlow(false)
     val isExplaining: StateFlow<Boolean> = _isExplaining.asStateFlow()
 
+    // Intent selection
+    private val _selectedIntent = MutableStateFlow(StudyIntent.AUTO)
+    val selectedIntent: StateFlow<StudyIntent> = _selectedIntent.asStateFlow()
+
+    fun setSelectedIntent(intent: StudyIntent) {
+        _selectedIntent.value = intent
+    }
+
     private val _explanationResult = MutableStateFlow<ExplanationResult?>(null)
     val explanationResult: StateFlow<ExplanationResult?> = _explanationResult.asStateFlow()
 
@@ -162,9 +213,11 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
     private val _sessionHistory = MutableStateFlow<List<StudyTopicSession>>(emptyList())
     val sessionHistory: StateFlow<List<StudyTopicSession>> = _sessionHistory.asStateFlow()
 
-    // No chat is open by default - the user lands on the empty canvas, not a pre-filled example.
     private val _activeSession = MutableStateFlow<StudyTopicSession?>(null)
     val activeSession: StateFlow<StudyTopicSession?> = _activeSession.asStateFlow()
+
+    private val _activeSessionImage = MutableStateFlow<Bitmap?>(null)
+    val activeSessionImage: StateFlow<Bitmap?> = _activeSessionImage.asStateFlow()
 
     private val _quizQuestions = MutableStateFlow<List<QuizQuestion>>(emptyList())
     val quizQuestions: StateFlow<List<QuizQuestion>> = _quizQuestions.asStateFlow()
@@ -262,17 +315,28 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
         loadRealFocusData()
     }
 
-    private fun ChatSessionEntity.toDomain(): StudyTopicSession = StudyTopicSession(
-        id = "$SESSION_ID_PREFIX$id",
-        title = title,
-        subject = subject,
-        previewText = previewText,
-        explanation = explanation,
-        formula = formula,
-        bulletPoints = bulletPoints,
-        usedOnlineContext = usedOnlineContext,
-        followUps = emptyList() // loaded on-demand in selectSession()
-    )
+    private fun ChatSessionEntity.toDomain(): StudyTopicSession {
+        val inferredIntent = StudyIntentClassifier.classify(previewText)
+        val parsedStructured = StructuredStudyResponseParser.parse(
+            rawOutput = explanation,
+            fallbackTopic = previewText,
+            inferredIntent = inferredIntent
+        )
+        return StudyTopicSession(
+            id = "$SESSION_ID_PREFIX$id",
+            title = title,
+            subject = subject,
+            previewText = previewText,
+            explanation = explanation,
+            formula = formula ?: parsedStructured.formulaOrCode?.content,
+            bulletPoints = bulletPoints,
+            usedOnlineContext = usedOnlineContext,
+            followUps = emptyList(), // loaded on-demand in selectSession()
+            structuredResponse = parsedStructured,
+            citations = emptyList(),
+            image = loadBitmapFromPath(imagePath)  // Restore session image from internal storage
+        )
+    }
 
     private fun deriveTopicDetails(rawText: String): Triple<String, String, String?> {
         val lower = rawText.lowercase()
@@ -298,19 +362,39 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
         val found = _sessionHistory.value.find { it.id == sessionId } ?: return
         _activeSession.value = found
         _capturedText.value = found.previewText
+        val structured = found.structuredResponse ?: StructuredStudyResponseParser.parse(
+            rawOutput = found.explanation,
+            fallbackTopic = found.previewText,
+            inferredIntent = StudyIntentClassifier.classify(found.previewText),
+            citations = found.citations
+        )
         _explanationResult.value = ExplanationResult(
             captureId = found.dbId() ?: System.currentTimeMillis(),
             finalExplanation = found.explanation,
-            usedOnlineContext = found.usedOnlineContext
+            usedOnlineContext = found.usedOnlineContext,
+            structuredResponse = structured,
+            citations = found.citations
         )
         // Reset KV-cache so tokens from previous chat sessions do not pollute the selected chat
         llmEngine.resetSession()
-        // Load this session's real follow-up thread from Room.
+        // Load this session's real follow-up thread from SQLite.
         viewModelScope.launch {
             val dbId = found.dbId()
             _followUpList.value = if (dbId != null) {
                 chatDao.getMessagesForSession(dbId).map { m ->
-                    FollowUpMessage(id = m.id.toString(), question = m.question, answer = m.answer, timestamp = m.timestamp)
+                    val parsedMsgStructured = StructuredStudyResponseParser.parse(
+                        rawOutput = m.answer,
+                        fallbackTopic = m.question,
+                        inferredIntent = StudyIntentClassifier.classify(m.question)
+                    )
+                    FollowUpMessage(
+                        id = m.id.toString(),
+                        question = m.question,
+                        answer = m.answer,
+                        timestamp = m.timestamp,
+                        structuredResponse = parsedMsgStructured,
+                        image = loadBitmapFromPath(m.imagePath)  // Restore uploaded image if present
+                    )
                 }
             } else {
                 emptyList()
@@ -319,12 +403,13 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun startNewSession() {
+        llmEngine.resetSession()
         _activeSession.value = null
+        _activeSessionImage.value = null
         _capturedText.value = ""
         _explanationResult.value = null
         _followUpList.value = emptyList()
-        // Reset KV-cache to 0 tokens for the fresh session
-        llmEngine.resetSession()
+        _selectedIntent.value = StudyIntent.AUTO
     }
 
     fun toggleSimulatedNetwork() {
@@ -334,11 +419,13 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
     // image != null means multimodal - the photo goes straight to the model, no OCR step.
     // customText/capturedText can legitimately be blank in that case.
     fun explainCurrentCapture(customText: String? = null, image: Bitmap? = null) {
+        llmEngine.resetConversation()
         val textToProcess = customText?.ifBlank { null }
             ?: _capturedText.value.ifBlank { if (image != null) "" else "General Study Topic" }
         _capturedText.value = textToProcess
         _isExplaining.value = true
         _followUpList.value = emptyList()
+        _activeSessionImage.value = image
         // Fresh capture gets a clean KV-cache
         llmEngine.resetSession()
 
@@ -346,10 +433,11 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
             val startTime = System.currentTimeMillis()
             val online = _isOnline.value
             val capture = StudyCapture(id = startTime, extractedText = textToProcess, timestamp = startTime)
+            val intentToUse = _selectedIntent.value
 
             // Real pipeline: on-device model always runs (reads the image directly when
             // provided); retrieval only blends in if online AND there's a text topic (§3a).
-            val result = explainPipeline.explain(capture, online, image)
+            val result = explainPipeline.explain(capture, online, image, intentToUse)
 
             val latency = System.currentTimeMillis() - startTime
             val wordCount = result.finalExplanation.split("\\s+".toRegex()).size
@@ -364,25 +452,30 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
                 thermalStatus = vitalsMonitor.getThermalStatus()
             )
 
-            val (topicTitle, topicSubject, topicFormula) = deriveTopicDetails(textToProcess)
+            val (fallbackTitle, fallbackSubject, fallbackFormula) = deriveTopicDetails(textToProcess)
+            val topicTitle = result.structuredResponse?.title ?: fallbackTitle
+            val topicSubject = result.structuredResponse?.subject ?: fallbackSubject
+            val topicFormula = result.structuredResponse?.formulaOrCode?.content ?: fallbackFormula
+
             val bulletPoints = listOf(
                 "• Key topic: $topicTitle",
-                "• Evaluated on-device by StudyLens AI",
-                if (result.usedOnlineContext) "• Enhanced with real-time web context" else "• Processed 100% offline on-device"
+                "• Pedagogical mode: ${result.structuredResponse?.intent?.displayName ?: "Concept"}",
+                if (result.usedOnlineContext) "• Enhanced with verified web research" else "• Processed 100% offline on-device"
             )
 
-            // Persist to Room - this is the real "remembers previous chats" storage.
-            // The sessionHistory Flow (collected in init) picks this up automatically.
+            // Persist to SQLite
+            val sessionImagePath = saveBitmapToFile(image, "session")
             val dbId = chatDao.insertSession(
                 ChatSessionEntity(
                     title = topicTitle,
                     subject = topicSubject,
                     previewText = textToProcess,
-                    explanation = result.finalExplanation,
+                    explanation = result.structuredResponse?.rawText ?: result.finalExplanation,
                     formula = topicFormula,
                     bulletPoints = bulletPoints,
                     usedOnlineContext = result.usedOnlineContext,
-                    timestamp = startTime
+                    timestamp = startTime,
+                    imagePath = sessionImagePath
                 )
             )
 
@@ -395,7 +488,10 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
                 formula = topicFormula,
                 bulletPoints = bulletPoints,
                 usedOnlineContext = result.usedOnlineContext,
-                followUps = emptyList()
+                followUps = emptyList(),
+                structuredResponse = result.structuredResponse,
+                citations = result.citations,
+                image = image
             )
             _explanationResult.value = result
             _isExplaining.value = false
@@ -403,17 +499,35 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun isSummarizeQuery(question: String): Boolean {
-        val lower = question.lowercase()
-        return lower.contains("summarize") || lower.contains("summarise") ||
-                lower.contains("summary") || lower.contains("recap") ||
-                lower.contains("key takeaways")
+        val lower = question.lowercase().trim()
+        // Exact keyword matches
+        val keywords = listOf(
+            "summarize", "summarise", "summary", "recap", "key takeaways",
+            "takeaways", "whole context", "all context", "full context",
+            "context of this chat", "context of the chat", "context of our chat",
+            "context of our conversation", "give me the context", "show me the context",
+            "what is the context", "context of this", "what did we talk about",
+            "what did we discuss", "what have we discussed", "what have we talked about",
+            "what were the topics", "overview of this chat", "overview of the chat",
+            "review of this chat", "everything we discussed", "everything we covered",
+            "technologies covered", "technologies discussed", "topics covered",
+            "topics discussed", "what was discussed", "covered so far",
+            "gist of", "gist", "brief me", "brief overview"
+        )
+        if (keywords.any { lower.contains(it) }) return true
+
+        // Regex patterns for typos and variations: "contzt", "contextt", "contxt", etc.
+        val contextVariationRegex = Regex("""con[a-z]?t[a-z]{0,3}[tx]+(?:\s+of)?""")
+        if (contextVariationRegex.containsMatchIn(lower)) return true
+
+        return false
     }
 
     fun summarizeCurrentConversation() {
         val rootExplanation = _explanationResult.value?.finalExplanation
             ?: _activeSession.value?.explanation
             ?: _capturedText.value
-        if (rootExplanation.isBlank()) return
+        if (rootExplanation.isBlank() && _followUpList.value.isEmpty()) return
 
         _isAnsweringFollowUp.value = true
 
@@ -453,10 +567,12 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun askFollowUp(question: String) {
-        if (question.isBlank()) return
+    fun askFollowUp(question: String, image: Bitmap? = null) {
+        val cleanQuestion = question.trim().ifBlank {
+            if (image != null) "Explain this uploaded image in detail." else return
+        }
 
-        if (isSummarizeQuery(question)) {
+        if (isSummarizeQuery(cleanQuestion)) {
             summarizeCurrentConversation()
             return
         }
@@ -471,10 +587,8 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
                 extractedText = _capturedText.value,
                 timestamp = startTime
             )
+            val intentToUse = _selectedIntent.value
 
-            // Build the full running transcript (original explanation + every prior Q&A) so
-            // the model has real context - without this, a second follow-up like "what is
-            // component" has no idea it's still talking about React from the first question.
             val conversationContext = buildString {
                 append("Topic explanation: ")
                 append(_explanationResult.value?.finalExplanation ?: _activeSession.value?.explanation ?: "")
@@ -484,30 +598,40 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
 
-            val result = explainPipeline.answerFollowUp(capture, conversationContext, question, online)
+            val result = explainPipeline.answerFollowUp(
+                capture = capture,
+                conversationContext = conversationContext,
+                question = cleanQuestion,
+                isOnline = online,
+                preferredIntent = intentToUse,
+                image = image
+            )
 
             val latency = System.currentTimeMillis() - startTime
             _vitals.value = _vitals.value.copy(latencyMs = latency)
 
-            // Persist under the active session so it survives app restarts, same as the
-            // explanation itself.
             val sessionDbId = _activeSession.value?.dbId()
             if (sessionDbId != null) {
+                val msgImagePath = saveBitmapToFile(image, "msg")
                 chatDao.insertMessage(
                     ChatMessageEntity(
                         sessionId = sessionDbId,
-                        question = question,
-                        answer = result.finalExplanation,
-                        timestamp = startTime
+                        question = cleanQuestion,
+                        answer = result.structuredResponse?.rawText ?: result.finalExplanation,
+                        timestamp = startTime,
+                        imagePath = msgImagePath
                     )
                 )
             }
 
             val newMessage = FollowUpMessage(
                 id = System.currentTimeMillis().toString(),
-                question = question,
+                question = cleanQuestion,
                 answer = result.finalExplanation,
-                usedOnlineContext = result.usedOnlineContext
+                usedOnlineContext = result.usedOnlineContext,
+                structuredResponse = result.structuredResponse,
+                citations = result.citations,
+                image = image
             )
             _followUpList.value = _followUpList.value + newMessage
             _isAnsweringFollowUp.value = false

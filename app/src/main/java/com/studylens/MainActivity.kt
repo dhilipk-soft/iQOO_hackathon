@@ -3,6 +3,7 @@ package com.studylens
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import androidx.activity.viewModels
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -16,9 +17,7 @@ import com.studylens.ui.navigation.NavGraph
 
 class MainActivity : ComponentActivity() {
 
-    private val viewModel: com.studylens.ui.StudyViewModel by lazy {
-        com.studylens.ui.StudyViewModel(application)
-    }
+    private val viewModel: com.studylens.ui.StudyViewModel by viewModels()
 
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()

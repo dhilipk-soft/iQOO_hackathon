@@ -1,11 +1,14 @@
 package com.studylens.ai
 
 import android.graphics.Bitmap
+import android.util.Log
 import com.studylens.BuildConfig
 import com.studylens.shared.ExplanationResult
 import com.studylens.shared.QuizQuestion
 import com.studylens.shared.StudyBrain
 import com.studylens.shared.StudyCapture
+import com.studylens.shared.StudyIntent
+import com.studylens.shared.VerifiedCitation
 import com.studylens.ui.FollowUpMessage
 
 class ExplainPipeline(
@@ -13,9 +16,13 @@ class ExplainPipeline(
     private val retrievalClient: RetrievalClient
 ) : StudyBrain {
 
-    private fun appendCitations(text: String, citations: List<WebCitation>): String {
+    companion object {
+        private const val TAG = "ExplainPipeline"
+    }
+
+    private fun appendCitations(text: String, citations: List<VerifiedCitation>): String {
         if (citations.isEmpty()) return text
-        return text + "\n\n📚 Sources:\n" + citations.joinToString("\n") { "• ${it.title}\n  ${it.url}" }
+        return text + "\n\n📚 Verified Sources:\n" + citations.joinToString("\n") { "• ${it.title} (${it.domain})\n  ${it.url}" }
     }
 
     private fun buildSystemHeader(profile: ModelProfile): String {
@@ -34,6 +41,9 @@ class ExplainPipeline(
 
     private fun isImplicitFollowUp(question: String): Boolean {
         val clean = question.lowercase().trim()
+        if (clean.contains("this chat") || clean.contains("this conversation") || clean.contains("we discuss") || clean.contains("we talk") || clean.contains("whole context") || clean.contains("all context")) {
+            return false
+        }
         // If it's arithmetic or math, it's an explicit calculation, NOT an implicit follow-up
         if (clean.contains(Regex("""\d+\s*[+\-*x×÷/]\s*\d+"""))) return false
         // Check for pronouns that imply dependence on the previous topic
@@ -123,6 +133,14 @@ class ExplainPipeline(
                 3. Third Law (Action-Reaction): For every action, there is an equal and opposite reaction (F_AB = -F_BA).
             """.trimIndent()
 
+            Regex("""\b(even\s+numbers?|parity|even\s+and\s+odd|odd\s+and\s+even|what\s+is\s+an?\s+even\s+number|is\s+-?\d+\s+even)\b""").containsMatchIn(lower) -> """
+                An even number is an integer that is exactly divisible by 2 with no remainder, written as n = 2k (for k ∈ ℤ).
+
+                • Parity Criterion: n mod 2 == 0. Any number ending in 0, 2, 4, 6, 8 is even.
+                • Edge Cases: 0 is an even integer (0 = 2 × 0); negative numbers like -2, -4 are even.
+                • Prime Property: 2 is the ONLY even prime number in all of mathematics.
+            """.trimIndent()
+
             else -> """
                 Overview for '$topic':
 
@@ -132,10 +150,36 @@ class ExplainPipeline(
         }
     }
 
-    override suspend fun explain(capture: StudyCapture, isOnline: Boolean, image: Bitmap?): ExplanationResult {
-        val retrieval = if (isOnline && capture.extractedText.isNotBlank()) {
+    override suspend fun explain(
+        capture: StudyCapture,
+        isOnline: Boolean,
+        image: Bitmap?,
+        preferredIntent: StudyIntent
+    ): ExplanationResult {
+        // 1. Math instant evaluation check
+        val mathResult = evaluateMathExpression(capture.extractedText)
+        if (mathResult != null) {
+            val structured = StructuredStudyResponseParser.parse(
+                rawOutput = mathResult,
+                fallbackTopic = capture.extractedText,
+                inferredIntent = StudyIntent.STEP_BY_STEP_SOLVER,
+                citations = emptyList()
+            )
+            return ExplanationResult(
+                captureId = capture.id,
+                finalExplanation = mathResult,
+                usedOnlineContext = false,
+                structuredResponse = structured,
+                citations = emptyList()
+            )
+        }
+
+        val topicText = capture.extractedText
+        val resolvedIntent = StudyIntentClassifier.classify(topicText, preferredIntent)
+
+        val retrieval = if (isOnline && topicText.isNotBlank()) {
             retrievalClient.fetchOnlineContext(
-                capture.extractedText,
+                topicText,
                 BuildConfig.OPENROUTER_API_KEY,
                 BuildConfig.GROQ_API_KEY
             )
@@ -144,36 +188,53 @@ class ExplainPipeline(
         }
 
         val profile = llmEngine.getActiveProfile()
+        val prompt = buildStructuredPrompt(
+            topic = topicText,
+            image = image,
+            intent = resolvedIntent,
+            retrievalFacts = retrieval.factsText,
+            profile = profile
+        )
 
-        val prompt = buildString {
-            append(buildSystemHeader(profile))
-            append("\n\n")
-            if (image != null) {
-                append("Look at the attached image (textbook page / handwritten problem) and explain what it is teaching.\n")
-            }
-            if (capture.extractedText.isNotBlank()) {
-                append("Topic / Question: ${capture.extractedText}\n\n")
-            }
-            if (retrieval.factsText.isNotBlank()) {
-                append("Retrieved Information from Search:\n${retrieval.factsText}\n\n")
-            }
-            append("Provide a thorough, easy-to-understand explanation for the student (2-3 detailed paragraphs or bullet points):")
-        }
+        var rawResponse = llmEngine.generateResponse(prompt, image)
 
-        var explanation = llmEngine.generateResponse(prompt, image)
+        val isFailedResponse = rawResponse.isBlank() ||
+                rawResponse.startsWith("Sorry,", ignoreCase = true) ||
+                rawResponse.contains("couldn't generate an explanation", ignoreCase = true) ||
+                rawResponse.contains("taking longer than expected", ignoreCase = true) ||
+                rawResponse.contains("model isn't loaded", ignoreCase = true) ||
+                isTrivialOrEcho(rawResponse, topicText)
 
-        if (isTrivialOrEcho(explanation, capture.extractedText) || explanation.contains("couldn't generate", ignoreCase = true)) {
-            explanation = if (retrieval.factsText.isNotBlank()) {
-                retrieval.factsText
+        if (isFailedResponse) {
+            if (isOnline) {
+                val onlineAnswer = retrievalClient.generateOnlineExplanation(
+                    prompt = prompt,
+                    openRouterKey = BuildConfig.OPENROUTER_API_KEY,
+                    groqKey = BuildConfig.GROQ_API_KEY
+                )
+                if (!onlineAnswer.isNullOrBlank()) {
+                    rawResponse = onlineAnswer
+                }
+            } else if (retrieval.factsText.isNotBlank()) {
+                rawResponse = retrieval.factsText
             } else {
-                generateFallbackExplanation(capture.extractedText)
+                rawResponse = generateFallbackExplanation(topicText)
             }
         }
+
+        val structured = StructuredStudyResponseParser.parse(
+            rawOutput = rawResponse,
+            fallbackTopic = topicText.ifBlank { "Study Session" },
+            inferredIntent = resolvedIntent,
+            citations = retrieval.citations
+        )
 
         return ExplanationResult(
             captureId = capture.id,
-            finalExplanation = appendCitations(explanation, retrieval.citations),
-            usedOnlineContext = retrieval.factsText.isNotBlank()
+            finalExplanation = structured.coreConcept,
+            usedOnlineContext = retrieval.factsText.isNotBlank(),
+            structuredResponse = structured,
+            citations = retrieval.citations
         )
     }
 
@@ -181,71 +242,133 @@ class ExplainPipeline(
         capture: StudyCapture,
         conversationContext: String,
         question: String,
-        isOnline: Boolean
+        isOnline: Boolean,
+        preferredIntent: StudyIntent,
+        image: Bitmap?
     ): ExplanationResult {
         // 1. Math Evaluation Check
         val mathResult = evaluateMathExpression(question)
         if (mathResult != null) {
+            val structured = StructuredStudyResponseParser.parse(
+                rawOutput = mathResult,
+                fallbackTopic = question,
+                inferredIntent = StudyIntent.STEP_BY_STEP_SOLVER,
+                citations = emptyList()
+            )
             return ExplanationResult(
                 captureId = capture.id,
                 finalExplanation = mathResult,
-                usedOnlineContext = false
+                usedOnlineContext = false,
+                structuredResponse = structured,
+                citations = emptyList()
             )
         }
 
-        // 2. Query Resolution: ONLY resolve mainTopic if question contains pronouns (e.g. "its version number")
-        val mainTopic = capture.extractedText.ifBlank { "Java" }
-        val searchQuery = if (isImplicitFollowUp(question)) {
-            "$mainTopic $question"
-        } else {
-            question
+        // 2. Query Resolution:
+        // - If there's an image, the question IS about the image; do NOT contaminate with old text topic.
+        // - Only prepend mainTopic if this is an implicit pronoun follow-up (no image).
+        val mainTopic = capture.extractedText.ifBlank { "Study Topic" }
+        val searchQuery = when {
+            image != null -> question.ifBlank { "Explain this image in detail." }  // Image = isolated query
+            isImplicitFollowUp(question) -> "$mainTopic $question"               // Pronoun follow-up
+            else -> question
         }
 
-        // 3. Web Retrieval
-        val retrieval = if (isOnline) {
-            retrievalClient.fetchOnlineContext(
-                searchQuery,
-                BuildConfig.OPENROUTER_API_KEY,
-                BuildConfig.GROQ_API_KEY
-            )
-        } else {
-            RetrievalResult("")
-        }
-
+        val resolvedIntent = StudyIntentClassifier.classify(question, preferredIntent)
         val profile = llmEngine.getActiveProfile()
-        val trimmedContext = if (isImplicitFollowUp(question)) conversationContext.takeLast(400) else ""
+        val trimmedContext = if (image != null) {
+            // For image-based follow-ups, do NOT include previous topic context
+            ""
+        } else if (isImplicitFollowUp(question)) {
+            conversationContext.takeLast(1500)
+        } else {
+            conversationContext.takeLast(3000)
+        }
 
         val prompt = buildString {
             append(buildSystemHeader(profile))
             append("\n\n")
-            if (trimmedContext.isNotBlank()) {
+            if (image != null) {
+                append("Analyze the attached image carefully and answer the student's question about it.\n\n")
+            } else if (trimmedContext.isNotBlank()) {
                 append("Topic Context:\n$trimmedContext\n\n")
             }
-            if (retrieval.factsText.isNotBlank()) {
-                append("Retrieved Web Facts:\n${retrieval.factsText}\n\n")
-            }
             append("Student Question: \"$question\"\n\n")
+            append("Format your response using structured tags:\n")
+            append("[INTENT: ${resolvedIntent.name}]\n")
+            append("[TITLE: Follow-up on $question]\n\n")
+            append("### 🎯 CORE PRINCIPLE\n")
+            append("Answer the question directly, thoroughly and accurately in 3-5 sentences.\n\n")
+            append("### 🔍 STEP-BY-STEP BREAKDOWN\n")
+            append("If applicable, list key steps or points (1. 2. 3.).\n\n")
+            append("### ⚠️ COMMON PITFALLS\n")
+            append("List any common confusion or mistake related to this.\n\n")
             append("Direct Answer:")
         }
 
-        var answer = llmEngine.generateResponse(prompt)
+        // 3. Online-first strategy: When online, use the web-powered generator first
+        var rawAnswer = ""
+        var usedOnline = false
+        var retrieval = RetrievalResult("")
 
-        // 4. Fail-Safe Interceptor
-        if (answer.contains("couldn't generate", ignoreCase = true) ||
-            answer.contains("longer than expected", ignoreCase = true) ||
-            isTrivialOrEcho(answer, question)) {
+        if (isOnline) {
+            // 3a. For non-image queries, also fetch web context for citations
+            if (image == null) {
+                retrieval = retrievalClient.fetchOnlineContext(
+                    searchQuery,
+                    BuildConfig.OPENROUTER_API_KEY,
+                    BuildConfig.GROQ_API_KEY
+                )
+            }
+            // 3b. Try online generation first (Groq/OpenRouter LLM)
+            val onlineAnswer = retrievalClient.generateOnlineExplanation(
+                prompt = if (retrieval.factsText.isNotBlank()) {
+                    "$prompt\n\nWeb Context:\n${retrieval.factsText}"
+                } else {
+                    prompt
+                },
+                openRouterKey = BuildConfig.OPENROUTER_API_KEY,
+                groqKey = BuildConfig.GROQ_API_KEY
+            )
+            if (!onlineAnswer.isNullOrBlank()) {
+                rawAnswer = onlineAnswer
+                usedOnline = true
+                Log.i(TAG, "answerFollowUp: used online generation (${rawAnswer.length} chars)")
+            }
+        }
 
-            answer = if (retrieval.factsText.isNotBlank()) {
+        // 4. Fallback to on-device multimodal LLM (with image if present)
+        if (rawAnswer.isBlank()) {
+            val onDeviceAnswer = llmEngine.generateResponse(prompt, image)
+            val isFailedAnswer = onDeviceAnswer.isBlank() ||
+                    onDeviceAnswer.startsWith("Sorry,", ignoreCase = true) ||
+                    onDeviceAnswer.contains("couldn't generate an explanation", ignoreCase = true) ||
+                    onDeviceAnswer.contains("taking longer than expected", ignoreCase = true) ||
+                    onDeviceAnswer.contains("model isn't loaded", ignoreCase = true) ||
+                    isTrivialOrEcho(onDeviceAnswer, question)
+
+            rawAnswer = if (!isFailedAnswer) {
+                onDeviceAnswer
+            } else if (retrieval.factsText.isNotBlank()) {
                 retrieval.factsText
             } else {
                 generateFallbackExplanation(searchQuery)
             }
         }
 
+        val structured = StructuredStudyResponseParser.parse(
+            rawOutput = rawAnswer,
+            fallbackTopic = question,
+            inferredIntent = resolvedIntent,
+            citations = retrieval.citations
+        )
+
         return ExplanationResult(
             captureId = capture.id,
-            finalExplanation = appendCitations(answer, retrieval.citations),
-            usedOnlineContext = retrieval.factsText.isNotBlank()
+            finalExplanation = structured.coreConcept,
+            usedOnlineContext = usedOnline,
+            structuredResponse = structured,
+            citations = retrieval.citations
         )
     }
 
@@ -258,38 +381,21 @@ class ExplainPipeline(
         val maxChars = availablePromptTokens * 4
 
         val fullTranscript = buildString {
-            append("Main Topic Explanation:\n$rootExplanation\n\n")
+            append("Main Initial Topic:\n${rootExplanation.take(500)}\n\n")
             if (followUps.isNotEmpty()) {
-                append("Follow-Up Discussion Points:\n")
+                append("Topics and Questions Discussed in Session:\n")
                 followUps.forEachIndexed { idx, fu ->
-                    append("[${idx + 1}] Q: ${fu.question}\n    A: ${fu.answer}\n\n")
+                    val cleanSnippet = fu.answer.trim().lines().firstOrNull { it.isNotBlank() }?.take(160) ?: fu.answer.take(160)
+                    append("[${idx + 1}] Question: ${fu.question}\n    Summary: $cleanSnippet\n\n")
                 }
             }
         }
 
-        return if (fullTranscript.length <= maxChars) {
-            SummaryContextResult(
-                transcript = fullTranscript,
-                mode = "Full Chat (${followUps.size + 1} sections)",
-                totalMessagesEvaluated = followUps.size + 1
-            )
-        } else {
-            val recent = followUps.takeLast(3)
-            val recentTranscript = buildString {
-                append("Main Topic Overview:\n${rootExplanation.take(400)}...\n\n")
-                if (recent.isNotEmpty()) {
-                    append("Recent Q&A Discussion (Last ${recent.size} exchanges):\n")
-                    recent.forEachIndexed { idx, fu ->
-                        append("Q: ${fu.question}\nA: ${fu.answer}\n\n")
-                    }
-                }
-            }
-            SummaryContextResult(
-                transcript = recentTranscript,
-                mode = "Recent Discussion (Last ${recent.size} Q&As + Topic Overview)",
-                totalMessagesEvaluated = recent.size + 1
-            )
-        }
+        return SummaryContextResult(
+            transcript = if (fullTranscript.length > maxChars) fullTranscript.take(maxChars) else fullTranscript,
+            mode = "Full Session Summary (${followUps.size + 1} topics evaluated)",
+            totalMessagesEvaluated = followUps.size + 1
+        )
     }
 
     suspend fun summarizeConversation(
@@ -302,33 +408,101 @@ class ExplainPipeline(
         llmEngine.resetSession()
 
         val prompt = buildString {
-            append("You are an expert study tutor. Summarize the following study session clearly and concisely.\n\n")
+            append("You are an expert study tutor. Summarize the following study session clearly and concisely covering all distinct topics.\n\n")
             append("CONVERSATION TRANSCRIPT (${contextResult.mode}):\n")
             append("${contextResult.transcript}\n\n")
             append("INSTRUCTIONS:\n")
-            append("1. Provide a structured summary with 3 sections:\n")
-            append("   📌 Core Concept & Main Subject\n")
+            append("1. Provide a structured summary covering ALL topics discussed above in 3 sections:\n")
+            append("   📌 Core Concepts & Main Subjects Covered\n")
             append("   💡 Key Q&As & Questions Answered\n")
             append("   🔑 Final Takeaways to Remember\n")
-            append("2. Keep the summary concise, accurate, and strictly relevant to the text above.\n")
+            append("2. Keep the summary concise, accurate, and strictly relevant to all topics discussed.\n")
             append("3. Do not invent unrelated topics.")
         }
 
         var summaryText = llmEngine.generateResponse(prompt)
         if (summaryText.isBlank() || summaryText.length < 20) {
-            summaryText = "📌 Core Concept: ${rootExplanation.take(100)}\n\n💡 Key Discussion: ${followUps.size} Q&As covered.\n\n🔑 Takeaway: Focus on core principles and practice problems."
+            val allTopics = (listOf(rootExplanation.take(60)) + followUps.map { it.question }).distinct()
+            summaryText = "📌 Core Concepts & Scope: Multi-topic study session covering: ${allTopics.joinToString(" • ")}.\n\n💡 Key Q&As: Addressed ${followUps.size} key questions comprehensively.\n\n🔑 Final Takeaways: Review and compare foundational characteristics and practical implementations across each topic."
         }
+
+        val structured = StructuredStudyResponseParser.parse(
+            rawOutput = summaryText,
+            fallbackTopic = "Session Summary",
+            inferredIntent = StudyIntent.REVISION_SUMMARY,
+            citations = emptyList()
+        )
 
         return ExplanationResult(
             captureId = System.currentTimeMillis(),
-            finalExplanation = summaryText,
-            usedOnlineContext = false
+            finalExplanation = structured.coreConcept,
+            usedOnlineContext = false,
+            structuredResponse = structured,
+            citations = emptyList()
         )
     }
 
     override suspend fun generateQuiz(capture: StudyCapture): List<QuizQuestion> {
         val quizGen = QuizGenerator(llmEngine)
         return quizGen.generateQuiz(capture)
+    }
+
+    private fun buildStructuredPrompt(
+        topic: String,
+        image: Bitmap?,
+        intent: StudyIntent,
+        retrievalFacts: String,
+        profile: ModelProfile = ModelProfile.STANDARD
+    ): String = buildString {
+        append(buildSystemHeader(profile))
+        append(" ")
+        if (image != null) {
+            append("Analyze the attached textbook page or diagram carefully. ")
+        }
+        append("Your response MUST use the following structured tags and headings:\n\n")
+        append("[INTENT: ${intent.name}]\n")
+        append("[TITLE: Short descriptive topic title]\n")
+        append("[SUBJECT: Academic subject e.g. Physics, Algebra, Biology, Computer Science]\n\n")
+
+        append("### 🎯 CORE PRINCIPLE\n")
+        when (intent) {
+            StudyIntent.STEP_BY_STEP_SOLVER ->
+                append("Clearly restate the problem and define all given variables.\n\n")
+            StudyIntent.REVISION_SUMMARY ->
+                append("Executive summary of the key concept and core definitions.\n\n")
+            StudyIntent.CODE_AND_ALGORITHM ->
+                append("Explain the algorithmic approach, data structures, and methodology.\n\n")
+            else ->
+                append("Explain the fundamental concept clearly and intuitively for a student.\n\n")
+        }
+
+        append("### 📐 FORMULA & GIVEN\n")
+        if (intent == StudyIntent.CODE_AND_ALGORITHM) {
+            append("Provide the clean code snippet with clear comments.\n\n")
+        } else {
+            append("State the primary governing formula, equation, or theorem.\n\n")
+        }
+
+        append("### 🔍 STEP-BY-STEP BREAKDOWN\n")
+        append("1. First step or derivation\n2. Next step\n3. Final result or conclusion\n\n")
+
+        append("### 💡 REAL-WORLD ANALOGY\n")
+        append("Provide an intuitive real-world analogy that makes the concept unforgettable.\n\n")
+
+        append("### ⚠️ COMMON PITFALLS\n")
+        append("• Key mistake students frequently make on exams\n• What to watch out for\n\n")
+
+        append("### ❓ CHECK YOUR UNDERSTANDING\n")
+        append("Pose a single quick conceptual question testing the student's understanding.\n")
+        append("[ANSWER: The concise correct answer and explanation]\n\n")
+
+        if (topic.isNotBlank()) {
+            append("Student Material / Query:\n$topic\n\n")
+        }
+
+        if (retrievalFacts.isNotBlank()) {
+            append("Verified online background facts (synthesize into the explanation):\n$retrievalFacts\n\n")
+        }
     }
 }
 

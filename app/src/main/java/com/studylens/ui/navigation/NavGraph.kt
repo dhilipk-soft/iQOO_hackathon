@@ -81,6 +81,7 @@ fun NavGraph(
     val isOnline by actualViewModel.isOnline.collectAsState()
     val isMultimodalSupported by actualViewModel.isMultimodalSupported.collectAsState()
     val isSpeaking by actualViewModel.ttsManager.isSpeaking.collectAsState()
+    val selectedIntent by actualViewModel.selectedIntent.collectAsState()
 
     val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
@@ -302,10 +303,14 @@ fun NavGraph(
                         if (activeSession == null || explanationResult == null) {
                             actualViewModel.explainCurrentCapture(customText = caption, image = bitmap)
                         } else {
-                            actualViewModel.startNewSession()
-                            actualViewModel.explainCurrentCapture(customText = caption, image = bitmap)
+                            actualViewModel.askFollowUp(
+                                question = if (caption.isNotBlank()) caption else "Explain this uploaded image in detail.",
+                                image = bitmap
+                            )
                         }
                     },
+                    selectedIntent = selectedIntent,
+                    onSelectIntent = { actualViewModel.setSelectedIntent(it) },
                     isFocusModeActive = isFocusModeActive,
                     onToggleFocusMode = { actualViewModel.toggleFocusMode() },
                     onTriggerIntentToSwitch = { actualViewModel.triggerIntentToSwitch() },
