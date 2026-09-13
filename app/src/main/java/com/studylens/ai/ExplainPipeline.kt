@@ -7,26 +7,31 @@ import com.studylens.shared.QuizQuestion
 import com.studylens.shared.StudyBrain
 import com.studylens.shared.StudyCapture
 
+import com.studylens.shared.StudyIntent
+import com.studylens.shared.VerifiedCitation
+
 class ExplainPipeline(
     private val llmEngine: LlmEngine,
     private val retrievalClient: RetrievalClient
 ) : StudyBrain {
 
-    private fun appendCitations(text: String, citations: List<WebCitation>): String {
+    private fun appendCitations(text: String, citations: List<VerifiedCitation>): String {
         if (citations.isEmpty()) return text
-        return text + "\n\n📚 Sources:\n" + citations.joinToString("\n") { "• ${it.title}\n  ${it.url}" }
+        return text + "\n\n📚 Verified Sources:\n" + citations.joinToString("\n") { "• ${it.title} (${it.domain})\n  ${it.url}" }
     }
 
-    // Step 1 (retrieve, only if online AND there's a text topic to search for) ->
-    // Step 2 (combine) -> Step 3 (generate, always local - reads the image directly when
-    // one is provided, no OCR involved)
-    override suspend fun explain(capture: StudyCapture, isOnline: Boolean, image: Bitmap?): ExplanationResult {
-        // With no OCR step, an image-only capture has no text topic to search the web
-        // for - retrieval only makes sense when there's actual text (typed, or alongside
-        // the image).
-        val retrieval = if (isOnline && capture.extractedText.isNotBlank()) {
+    override suspend fun explain(
+        capture: StudyCapture,
+        isOnline: Boolean,
+        image: Bitmap?,
+        preferredIntent: StudyIntent
+    ): ExplanationResult {
+        val topicText = capture.extractedText
+        val resolvedIntent = StudyIntentClassifier.classify(topicText, preferredIntent)
+
+        val retrieval = if (isOnline && topicText.isNotBlank()) {
             retrievalClient.fetchOnlineContext(
-                capture.extractedText,
+                topicText,
                 BuildConfig.OPENROUTER_API_KEY,
                 BuildConfig.GROQ_API_KEY
             )
@@ -34,39 +39,28 @@ class ExplainPipeline(
             RetrievalResult("")
         }
 
-        val prompt = buildString {
-            append("You are a patient tutor explaining to a student with limited internet access. ")
-            if (image != null) {
-                append("Look at the attached image (a textbook page or handwritten problem) and ")
-                append("explain what it's teaching. ")
-            }
-            if (retrieval.factsText.isNotBlank()) {
-                // Online + retrieval succeeded - there's real multi-source material to work
-                // with, so ask for genuine synthesis, not just a longer version of the same
-                // generic answer.
-                append("Give a thorough, detailed explanation (aim for 10-15 sentences, organized into ")
-                append("clear points or short paragraphs) that weaves together the current information ")
-                append("below WITH your own subject knowledge - don't just append the facts as a list, ")
-                append("actually explain how they fit into the topic. Be substantive, not repetitive.\n\n")
-            } else {
-                append("Give a clear, detailed explanation - aim for 5-8 sentences (more if the topic ")
-                append("genuinely needs it). Be thorough, don't pad with filler, but don't be overly brief ")
-                append("either.\n\n")
-            }
-            if (capture.extractedText.isNotBlank()) {
-                append("Content: ${capture.extractedText}\n")
-            }
-            if (retrieval.factsText.isNotBlank()) {
-                append("\nCurrent information from multiple sources - use this to make the explanation ")
-                append("richer and more up to date:\n${retrieval.factsText}\n")
-            }
-        }
-        val explanation = llmEngine.generateResponse(prompt, image) // always runs, on-device, this is the guarantee
+        val prompt = buildStructuredPrompt(
+            topic = topicText,
+            image = image,
+            intent = resolvedIntent,
+            retrievalFacts = retrieval.factsText
+        )
+
+        val rawResponse = llmEngine.generateResponse(prompt, image)
+
+        val structured = StructuredStudyResponseParser.parse(
+            rawOutput = rawResponse,
+            fallbackTopic = topicText.ifBlank { "Study Session" },
+            inferredIntent = resolvedIntent,
+            citations = retrieval.citations
+        )
 
         return ExplanationResult(
             captureId = capture.id,
-            finalExplanation = appendCitations(explanation, retrieval.citations),
-            usedOnlineContext = retrieval.factsText.isNotBlank()
+            finalExplanation = structured.coreConcept,
+            usedOnlineContext = retrieval.factsText.isNotBlank(),
+            structuredResponse = structured,
+            citations = retrieval.citations
         )
     }
 
@@ -74,10 +68,11 @@ class ExplainPipeline(
         capture: StudyCapture,
         conversationContext: String,
         question: String,
-        isOnline: Boolean
+        isOnline: Boolean,
+        preferredIntent: StudyIntent
     ): ExplanationResult {
-        // Retrieve using the actual follow-up question, not the original captured text -
-        // that's what's actually relevant to this specific turn of the conversation.
+        val resolvedIntent = StudyIntentClassifier.classify(question, preferredIntent)
+
         val retrieval = if (isOnline) {
             retrievalClient.fetchOnlineContext(
                 question,
@@ -88,37 +83,98 @@ class ExplainPipeline(
             RetrievalResult("")
         }
 
-        // Keep only the most recent part of a long-running conversation so the prompt stays
-        // small enough to leave the model room to actually answer.
         val trimmedContext = conversationContext.takeLast(1500)
 
         val prompt = buildString {
-            append("You are continuing a tutoring conversation. Here is the conversation so far:\n")
-            append("$trimmedContext\n\n")
-            append("The student now asks: \"$question\"\n\n")
+            append("You are an expert tutor continuing an interactive study session.\n")
+            append("Previous conversation context:\n$trimmedContext\n\n")
+            append("Student question: \"$question\"\n\n")
+            append("Format your response using structured tags:\n")
+            append("[INTENT: ${resolvedIntent.name}]\n")
+            append("[TITLE: Follow-up on $question]\n\n")
+            append("### 🎯 CORE PRINCIPLE\n")
+            append("Answer the question directly, thoroughly and accurately in 3-5 sentences.\n\n")
+            append("### 🔍 STEP-BY-STEP BREAKDOWN\n")
+            append("If applicable, list key steps or points (1. 2. 3.).\n\n")
+            append("### ⚠️ COMMON PITFALLS\n")
+            append("List any common confusion or mistake related to this.\n\n")
             if (retrieval.factsText.isNotBlank()) {
-                append("Answer this new question thoroughly and in detail (aim for 10-15 sentences), ")
-                append("weaving together the current information below WITH your own knowledge - actually ")
-                append("synthesize it into a real explanation, don't just list the facts. ")
-            } else {
-                append("Answer this new question directly and thoroughly (aim for 5-8 sentences where the ")
-                append("topic warrants it). ")
-            }
-            append("Use the conversation above for context ONLY if the new question is actually related ")
-            append("to it - if it's a new, unrelated topic, just answer it on its own terms using your own ")
-            append("knowledge. Do not repeat the question back, and do not just restate earlier answers.")
-            if (retrieval.factsText.isNotBlank()) {
-                append("\n\nCurrent information from multiple sources - use this to make the answer richer ")
-                append("and more up to date:\n${retrieval.factsText}")
+                append("Verified research facts to synthesize:\n${retrieval.factsText}\n")
             }
         }
-        val answer = llmEngine.generateResponse(prompt)
+
+        val rawAnswer = llmEngine.generateResponse(prompt)
+
+        val structured = StructuredStudyResponseParser.parse(
+            rawOutput = rawAnswer,
+            fallbackTopic = question,
+            inferredIntent = resolvedIntent,
+            citations = retrieval.citations
+        )
 
         return ExplanationResult(
             captureId = capture.id,
-            finalExplanation = appendCitations(answer, retrieval.citations),
-            usedOnlineContext = retrieval.factsText.isNotBlank()
+            finalExplanation = structured.coreConcept,
+            usedOnlineContext = retrieval.factsText.isNotBlank(),
+            structuredResponse = structured,
+            citations = retrieval.citations
         )
+    }
+
+    private fun buildStructuredPrompt(
+        topic: String,
+        image: Bitmap?,
+        intent: StudyIntent,
+        retrievalFacts: String
+    ): String = buildString {
+        append("You are an expert educational tutor in StudyLens. ")
+        if (image != null) {
+            append("Analyze the attached textbook page or diagram carefully. ")
+        }
+        append("Your response MUST use the following structured tags and headings:\n\n")
+        append("[INTENT: ${intent.name}]\n")
+        append("[TITLE: Short descriptive topic title]\n")
+        append("[SUBJECT: Academic subject e.g. Physics, Algebra, Biology, Computer Science]\n\n")
+
+        append("### 🎯 CORE PRINCIPLE\n")
+        when (intent) {
+            StudyIntent.STEP_BY_STEP_SOLVER ->
+                append("Clearly restate the problem and define all given variables.\n\n")
+            StudyIntent.REVISION_SUMMARY ->
+                append("Executive summary of the key concept and core definitions.\n\n")
+            StudyIntent.CODE_AND_ALGORITHM ->
+                append("Explain the algorithmic approach, data structures, and methodology.\n\n")
+            else ->
+                append("Explain the fundamental concept clearly and intuitively for a student.\n\n")
+        }
+
+        append("### 📐 FORMULA & GIVEN\n")
+        if (intent == StudyIntent.CODE_AND_ALGORITHM) {
+            append("Provide the clean code snippet with clear comments.\n\n")
+        } else {
+            append("State the primary governing formula, equation, or theorem.\n\n")
+        }
+
+        append("### 🔍 STEP-BY-STEP BREAKDOWN\n")
+        append("1. First step or derivation\n2. Next step\n3. Final result or conclusion\n\n")
+
+        append("### 💡 REAL-WORLD ANALOGY\n")
+        append("Provide an intuitive real-world analogy that makes the concept unforgettable.\n\n")
+
+        append("### ⚠️ COMMON PITFALLS\n")
+        append("• Key mistake students frequently make on exams\n• What to watch out for\n\n")
+
+        append("### ❓ CHECK YOUR UNDERSTANDING\n")
+        append("Pose a single quick conceptual question testing the student's understanding.\n")
+        append("[ANSWER: The concise correct answer and explanation]\n\n")
+
+        if (topic.isNotBlank()) {
+            append("Student Material / Query:\n$topic\n\n")
+        }
+
+        if (retrievalFacts.isNotBlank()) {
+            append("Verified online background facts (synthesize into the explanation):\n$retrievalFacts\n\n")
+        }
     }
 
     override suspend fun generateQuiz(capture: StudyCapture): List<QuizQuestion> {

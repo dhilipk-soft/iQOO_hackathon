@@ -7,6 +7,7 @@ import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.Body
 import retrofit2.http.Header
 import retrofit2.http.POST
+import com.studylens.shared.VerifiedCitation
 
 private const val TAG = "RetrievalClient"
 
@@ -44,11 +45,35 @@ interface GroqApi {
     ): HashMap<String, Any>
 }
 
-data class WebCitation(val title: String, val url: String)
+typealias WebCitation = VerifiedCitation
+
+fun extractCleanDomain(url: String): Pair<String, Boolean> {
+    val cleanUrl = url.removePrefix("https://").removePrefix("http://").removePrefix("www.")
+    val host = cleanUrl.split("/").firstOrNull()?.split(":")?.firstOrNull()?.lowercase() ?: "Web Source"
+    val isEducational = host.endsWith(".edu") || host.contains("khanacademy") ||
+            host.contains("wikipedia") || host.contains("britannica") ||
+            host.contains("nature.com") || host.contains("sciencedirect") ||
+            host.contains("arxiv") || host.contains("mit.edu") || host.contains("stanford.edu") ||
+            host.contains("geeksforgeeks") || host.contains("coursera") || host.contains("edx.org")
+
+    val displayName = when {
+        host.contains("wikipedia.org") -> "Wikipedia"
+        host.contains("khanacademy.org") -> "Khan Academy"
+        host.contains("britannica.com") -> "Encyclopaedia Britannica"
+        host.contains("nature.com") -> "Nature Journal"
+        host.contains("sciencedirect.com") -> "ScienceDirect"
+        host.contains("arxiv.org") -> "arXiv Research"
+        host.contains("mit.edu") -> "MIT OpenCourseWare"
+        host.contains("stanford.edu") -> "Stanford Edu"
+        host.contains("geeksforgeeks.org") -> "GeeksforGeeks"
+        else -> host.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
+    }
+    return Pair(displayName, isEducational)
+}
 
 data class RetrievalResult(
     val factsText: String,
-    val citations: List<WebCitation> = emptyList()
+    val citations: List<VerifiedCitation> = emptyList()
 )
 
 /**
@@ -170,9 +195,12 @@ class RetrievalClient {
         val citations = annotations.mapNotNull { annotation ->
             val urlCitation = annotation["url_citation"] as? Map<String, Any> ?: return@mapNotNull null
             val url = urlCitation["url"] as? String ?: return@mapNotNull null
-            val title = (urlCitation["title"] as? String)?.takeIf { it.isNotBlank() } ?: url
-            WebCitation(title, url)
-        }.distinctBy { it.url }
+            if (!url.startsWith("http")) return@mapNotNull null
+            val (domain, isEdu) = extractCleanDomain(url)
+            val title = (urlCitation["title"] as? String)?.takeIf { it.isNotBlank() } ?: domain
+            VerifiedCitation(title = title, url = url, domain = domain, isEducational = isEdu)
+        }.distinctBy { it.domain }
+         .take(3)
 
         return RetrievalResult(stripInlineCitationMarkers(content), citations)
     }
@@ -203,10 +231,13 @@ class RetrievalClient {
                     ?: emptyList()
                 results.mapNotNull { result ->
                     val url = result["url"] as? String ?: return@mapNotNull null
-                    val title = (result["title"] as? String)?.takeIf { it.isNotBlank() } ?: url
-                    WebCitation(title, url)
+                    if (!url.startsWith("http")) return@mapNotNull null
+                    val (domain, isEdu) = extractCleanDomain(url)
+                    val title = (result["title"] as? String)?.takeIf { it.isNotBlank() } ?: domain
+                    VerifiedCitation(title = title, url = url, domain = domain, isEducational = isEdu)
                 }
-            }.distinctBy { it.url }
+            }.distinctBy { it.domain }
+             .take(3)
         } catch (e: Exception) {
             emptyList()
         }

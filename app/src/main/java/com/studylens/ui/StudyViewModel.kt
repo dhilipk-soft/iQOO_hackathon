@@ -43,13 +43,21 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import com.studylens.ai.StructuredStudyResponseParser
+import com.studylens.ai.StudyIntentClassifier
+import com.studylens.shared.FormulaCodeBlock
+import com.studylens.shared.StructuredStudyResponse
+import com.studylens.shared.StudyIntent
+import com.studylens.shared.VerifiedCitation
 
 data class FollowUpMessage(
     val id: String,
     val question: String,
     val answer: String,
     val usedOnlineContext: Boolean = false,
-    val timestamp: Long = System.currentTimeMillis()
+    val timestamp: Long = System.currentTimeMillis(),
+    val structuredResponse: StructuredStudyResponse? = null,
+    val citations: List<VerifiedCitation> = emptyList()
 )
 
 data class StudyTopicSession(
@@ -61,7 +69,9 @@ data class StudyTopicSession(
     val formula: String? = null,
     val bulletPoints: List<String> = emptyList(),
     val usedOnlineContext: Boolean = false,
-    val followUps: List<FollowUpMessage> = emptyList()
+    val followUps: List<FollowUpMessage> = emptyList(),
+    val structuredResponse: StructuredStudyResponse? = null,
+    val citations: List<VerifiedCitation> = emptyList()
 )
 
 private const val SESSION_ID_PREFIX = "session_"
@@ -147,6 +157,14 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _isExplaining = MutableStateFlow(false)
     val isExplaining: StateFlow<Boolean> = _isExplaining.asStateFlow()
+
+    // Intent selection
+    private val _selectedIntent = MutableStateFlow(StudyIntent.AUTO)
+    val selectedIntent: StateFlow<StudyIntent> = _selectedIntent.asStateFlow()
+
+    fun setSelectedIntent(intent: StudyIntent) {
+        _selectedIntent.value = intent
+    }
 
     private val _explanationResult = MutableStateFlow<ExplanationResult?>(null)
     val explanationResult: StateFlow<ExplanationResult?> = _explanationResult.asStateFlow()
@@ -262,17 +280,27 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
         loadRealFocusData()
     }
 
-    private fun ChatSessionEntity.toDomain(): StudyTopicSession = StudyTopicSession(
-        id = "$SESSION_ID_PREFIX$id",
-        title = title,
-        subject = subject,
-        previewText = previewText,
-        explanation = explanation,
-        formula = formula,
-        bulletPoints = bulletPoints,
-        usedOnlineContext = usedOnlineContext,
-        followUps = emptyList() // loaded on-demand in selectSession()
-    )
+    private fun ChatSessionEntity.toDomain(): StudyTopicSession {
+        val inferredIntent = StudyIntentClassifier.classify(previewText)
+        val parsedStructured = StructuredStudyResponseParser.parse(
+            rawOutput = explanation,
+            fallbackTopic = previewText,
+            inferredIntent = inferredIntent
+        )
+        return StudyTopicSession(
+            id = "$SESSION_ID_PREFIX$id",
+            title = title,
+            subject = subject,
+            previewText = previewText,
+            explanation = explanation,
+            formula = formula ?: parsedStructured.formulaOrCode?.content,
+            bulletPoints = bulletPoints,
+            usedOnlineContext = usedOnlineContext,
+            followUps = emptyList(), // loaded on-demand in selectSession()
+            structuredResponse = parsedStructured,
+            citations = emptyList()
+        )
+    }
 
     private fun deriveTopicDetails(rawText: String): Triple<String, String, String?> {
         val lower = rawText.lowercase()
@@ -298,17 +326,36 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
         val found = _sessionHistory.value.find { it.id == sessionId } ?: return
         _activeSession.value = found
         _capturedText.value = found.previewText
+        val structured = found.structuredResponse ?: StructuredStudyResponseParser.parse(
+            rawOutput = found.explanation,
+            fallbackTopic = found.previewText,
+            inferredIntent = StudyIntentClassifier.classify(found.previewText),
+            citations = found.citations
+        )
         _explanationResult.value = ExplanationResult(
             captureId = found.dbId() ?: System.currentTimeMillis(),
             finalExplanation = found.explanation,
-            usedOnlineContext = found.usedOnlineContext
+            usedOnlineContext = found.usedOnlineContext,
+            structuredResponse = structured,
+            citations = found.citations
         )
-        // Load this session's real follow-up thread from Room.
+        // Load this session's real follow-up thread from SQLite.
         viewModelScope.launch {
             val dbId = found.dbId()
             _followUpList.value = if (dbId != null) {
                 chatDao.getMessagesForSession(dbId).map { m ->
-                    FollowUpMessage(id = m.id.toString(), question = m.question, answer = m.answer, timestamp = m.timestamp)
+                    val parsedMsgStructured = StructuredStudyResponseParser.parse(
+                        rawOutput = m.answer,
+                        fallbackTopic = m.question,
+                        inferredIntent = StudyIntentClassifier.classify(m.question)
+                    )
+                    FollowUpMessage(
+                        id = m.id.toString(),
+                        question = m.question,
+                        answer = m.answer,
+                        timestamp = m.timestamp,
+                        structuredResponse = parsedMsgStructured
+                    )
                 }
             } else {
                 emptyList()
@@ -340,10 +387,11 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
             val startTime = System.currentTimeMillis()
             val online = _isOnline.value
             val capture = StudyCapture(id = startTime, extractedText = textToProcess, timestamp = startTime)
+            val intentToUse = _selectedIntent.value
 
             // Real pipeline: on-device model always runs (reads the image directly when
             // provided); retrieval only blends in if online AND there's a text topic (§3a).
-            val result = explainPipeline.explain(capture, online, image)
+            val result = explainPipeline.explain(capture, online, image, intentToUse)
 
             val latency = System.currentTimeMillis() - startTime
             val wordCount = result.finalExplanation.split("\\s+".toRegex()).size
@@ -358,21 +406,24 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
                 thermalStatus = vitalsMonitor.getThermalStatus()
             )
 
-            val (topicTitle, topicSubject, topicFormula) = deriveTopicDetails(textToProcess)
+            val (fallbackTitle, fallbackSubject, fallbackFormula) = deriveTopicDetails(textToProcess)
+            val topicTitle = result.structuredResponse?.title ?: fallbackTitle
+            val topicSubject = result.structuredResponse?.subject ?: fallbackSubject
+            val topicFormula = result.structuredResponse?.formulaOrCode?.content ?: fallbackFormula
+
             val bulletPoints = listOf(
                 "• Key topic: $topicTitle",
-                "• Evaluated on-device by StudyLens AI",
-                if (result.usedOnlineContext) "• Enhanced with real-time web context" else "• Processed 100% offline on-device"
+                "• Pedagogical mode: ${result.structuredResponse?.intent?.displayName ?: "Concept"}",
+                if (result.usedOnlineContext) "• Enhanced with verified web research" else "• Processed 100% offline on-device"
             )
 
-            // Persist to Room - this is the real "remembers previous chats" storage.
-            // The sessionHistory Flow (collected in init) picks this up automatically.
+            // Persist to SQLite
             val dbId = chatDao.insertSession(
                 ChatSessionEntity(
                     title = topicTitle,
                     subject = topicSubject,
                     previewText = textToProcess,
-                    explanation = result.finalExplanation,
+                    explanation = result.structuredResponse?.rawText ?: result.finalExplanation,
                     formula = topicFormula,
                     bulletPoints = bulletPoints,
                     usedOnlineContext = result.usedOnlineContext,
@@ -389,7 +440,9 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
                 formula = topicFormula,
                 bulletPoints = bulletPoints,
                 usedOnlineContext = result.usedOnlineContext,
-                followUps = emptyList()
+                followUps = emptyList(),
+                structuredResponse = result.structuredResponse,
+                citations = result.citations
             )
             _explanationResult.value = result
             _isExplaining.value = false
@@ -408,10 +461,8 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
                 extractedText = _capturedText.value,
                 timestamp = startTime
             )
+            val intentToUse = _selectedIntent.value
 
-            // Build the full running transcript (original explanation + every prior Q&A) so
-            // the model has real context - without this, a second follow-up like "what is
-            // component" has no idea it's still talking about React from the first question.
             val conversationContext = buildString {
                 append("Topic explanation: ")
                 append(_explanationResult.value?.finalExplanation ?: _activeSession.value?.explanation ?: "")
@@ -421,20 +472,18 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
 
-            val result = explainPipeline.answerFollowUp(capture, conversationContext, question, online)
+            val result = explainPipeline.answerFollowUp(capture, conversationContext, question, online, intentToUse)
 
             val latency = System.currentTimeMillis() - startTime
             _vitals.value = _vitals.value.copy(latencyMs = latency)
 
-            // Persist under the active session so it survives app restarts, same as the
-            // explanation itself.
             val sessionDbId = _activeSession.value?.dbId()
             if (sessionDbId != null) {
                 chatDao.insertMessage(
                     ChatMessageEntity(
                         sessionId = sessionDbId,
                         question = question,
-                        answer = result.finalExplanation,
+                        answer = result.structuredResponse?.rawText ?: result.finalExplanation,
                         timestamp = startTime
                     )
                 )
@@ -444,7 +493,9 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
                 id = System.currentTimeMillis().toString(),
                 question = question,
                 answer = result.finalExplanation,
-                usedOnlineContext = result.usedOnlineContext
+                usedOnlineContext = result.usedOnlineContext,
+                structuredResponse = result.structuredResponse,
+                citations = result.citations
             )
             _followUpList.value = _followUpList.value + newMessage
             _isAnsweringFollowUp.value = false

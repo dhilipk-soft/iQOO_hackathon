@@ -65,6 +65,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import com.studylens.shared.ExplanationResult
 import com.studylens.shared.InferenceStats
+import com.studylens.shared.StudyIntent
 import com.studylens.ui.FollowUpMessage
 import com.studylens.ui.StudyTopicSession
 import java.io.File
@@ -92,6 +93,8 @@ fun StudyChatScreen(
     onTakeQuiz: () -> Unit,
     onToggleSimulatedNetwork: () -> Unit,
     onExplainImage: (Bitmap, String) -> Unit = { _, _ -> },
+    selectedIntent: StudyIntent = StudyIntent.AUTO,
+    onSelectIntent: (StudyIntent) -> Unit = {},
     isFocusModeActive: Boolean = false,
     onToggleFocusMode: () -> Unit = {},
     onTriggerIntentToSwitch: () -> Unit = {},
@@ -683,14 +686,14 @@ fun StudyChatScreen(
                         contentPadding = PaddingValues(top = 12.dp, bottom = 120.dp),
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        // Topic Explanation Card (Screen 3)
+                        // Structured Topic Explanation Card
                         item {
-                            StudyExplanationCard(
-                                title = activeSession?.title ?: "Study Explanation",
-                                explanation = explanationResult?.finalExplanation ?: activeSession?.explanation ?: "",
-                                formula = activeSession?.formula,
-                                bulletPoints = activeSession?.bulletPoints ?: emptyList(),
+                            StructuredExplanationCard(
+                                response = explanationResult?.structuredResponse ?: activeSession?.structuredResponse,
+                                fallbackTitle = activeSession?.title ?: "Study Explanation",
+                                fallbackExplanation = explanationResult?.finalExplanation ?: activeSession?.explanation ?: "",
                                 usedOnlineContext = explanationResult?.usedOnlineContext ?: activeSession?.usedOnlineContext ?: false,
+                                citations = explanationResult?.citations?.ifEmpty { null } ?: activeSession?.citations ?: emptyList(),
                                 isSpeaking = isSpeaking,
                                 onSpeak = { onSpeakText(explanationResult?.finalExplanation ?: activeSession?.explanation ?: "") },
                                 onStopSpeak = onStopSpeaking,
@@ -706,9 +709,9 @@ fun StudyChatScreen(
                             )
                         }
 
-                        // Follow-up Q&A List (Screen 4)
+                        // Structured Follow-up Q&A List
                         items(followUpList) { followUp ->
-                            FollowUpCard(
+                            StructuredFollowUpCard(
                                 message = followUp,
                                 isLiked = likedCards.contains(followUp.id),
                                 onToggleLike = {
@@ -825,6 +828,13 @@ fun StudyChatScreen(
                             }
                         }
                     }
+
+                    // Pedagogical Intent Selector Bar
+                    IntentSelectorStrip(
+                        selectedIntent = selectedIntent,
+                        onSelectIntent = onSelectIntent,
+                        modifier = Modifier.padding(bottom = 6.dp)
+                    )
 
                     // Bottom Pill Input Bar (Reference Image 2 ChatGPT Style)
                     BottomStudyInputBar(

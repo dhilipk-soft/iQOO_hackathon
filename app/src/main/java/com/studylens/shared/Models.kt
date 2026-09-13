@@ -2,10 +2,54 @@ package com.studylens.shared
 
 data class StudyCapture(val id: Long, val extractedText: String, val timestamp: Long)
 
+enum class StudyIntent(val displayName: String, val icon: String, val description: String) {
+    AUTO("Auto", "✨", "Automatically detect the best educational format"),
+    CONCEPT_EXPLANATION("Concept", "💡", "Intuitive deep-dive with analogies & mechanisms"),
+    STEP_BY_STEP_SOLVER("Solve", "🧮", "STEM problem breakdown with formulas & steps"),
+    REVISION_SUMMARY("Revision", "⚡", "High-yield summary, cheat sheet & exam tips"),
+    CODE_AND_ALGORITHM("Code", "💻", "Algorithm analysis, implementation & complexity"),
+    DIRECT_CLARIFICATION("Quick Q&A", "❓", "Direct and concise factual answer")
+}
+
+data class VerifiedCitation(
+    val title: String,
+    val url: String,
+    val domain: String,
+    val isEducational: Boolean = false
+)
+
+data class FormulaCodeBlock(
+    val content: String,
+    val languageOrType: String = "math",
+    val isCode: Boolean = false
+)
+
+data class QuickCheckQuestion(
+    val question: String,
+    val answer: String,
+    val explanation: String? = null
+)
+
+data class StructuredStudyResponse(
+    val intent: StudyIntent,
+    val title: String,
+    val subject: String,
+    val coreConcept: String,
+    val formulaOrCode: FormulaCodeBlock? = null,
+    val steps: List<String> = emptyList(),
+    val analogy: String? = null,
+    val commonPitfalls: List<String> = emptyList(),
+    val quickCheck: QuickCheckQuestion? = null,
+    val citations: List<VerifiedCitation> = emptyList(),
+    val rawText: String = ""
+)
+
 data class ExplanationResult(
     val captureId: Long,
     val finalExplanation: String,
-    val usedOnlineContext: Boolean
+    val usedOnlineContext: Boolean,
+    val structuredResponse: StructuredStudyResponse? = null,
+    val citations: List<VerifiedCitation> = emptyList()
 )
 
 data class QuizQuestion(
