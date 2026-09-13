@@ -58,6 +58,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -444,21 +445,11 @@ fun StudyChatScreen(
                                 )
                             }
                             Spacer(modifier = Modifier.height(6.dp))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text(
-                                    text = "Speed: ${vitals.tokensPerSecond} t/s",
-                                    color = Color(0xFF64748B),
-                                    fontSize = 11.sp
-                                )
-                                Text(
-                                    text = "RAM: ${vitals.ramUsedMb} MB",
-                                    color = Color(0xFF64748B),
-                                    fontSize = 11.sp
-                                )
-                            }
+                            Text(
+                                text = "Speed: ${vitals.tokensPerSecond} t/s",
+                                color = Color(0xFF64748B),
+                                fontSize = 11.sp
+                            )
                         }
                     }
 
@@ -503,13 +494,17 @@ fun StudyChatScreen(
                                 HamburgerIcon(tint = Color(0xFF1E1B4B))
                             }
 
-                            // Center: Title
+                            // Center: Title - weight(fill=false) lets it shrink for a long
+                            // session title instead of squeezing the badge next to it into
+                            // wrapping onto two lines ("Onlin" / "e").
                             Text(
                                 text = activeSession?.title ?: "StudyLens",
                                 color = Color(0xFF1E1B4B),
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.Bold,
-                                maxLines = 1
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false).padding(horizontal = 8.dp)
                             )
 
                             // Right: Offline status badge (clickable to toggle simulation)
@@ -533,7 +528,9 @@ fun StudyChatScreen(
                                         text = if (isOnline) "📡 Online" else "📴 Offline answer",
                                         color = if (isOnline) Color(0xFF4F46E5) else Color(0xFF059669),
                                         fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        softWrap = false
                                     )
                                 }
                             }
@@ -686,7 +683,11 @@ fun StudyChatScreen(
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(horizontal = 16.dp),
-                        contentPadding = PaddingValues(top = 12.dp, bottom = 175.dp),
+                        // bottom accounts for the pinned dock: attachment banner (conditional)
+                        // + IntentSelectorStrip (~44dp incl. its own bottom margin) + input bar
+                        // + dock padding - without the extra room, the dock (which grew when
+                        // IntentSelectorStrip was added) overlaps the last card's content.
+                        contentPadding = PaddingValues(top = 12.dp, bottom = 230.dp),
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
                         // Structured Topic Explanation Card
