@@ -402,6 +402,21 @@ fun StudyChatScreen(
                                             fontSize = 11.sp
                                         )
                                     }
+
+                                    Spacer(modifier = Modifier.width(6.dp))
+
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = if (session.usedOnlineContext) Color(0xFFEEF2FF) else Color(0xFFF1F5F9)
+                                    ) {
+                                        Text(
+                                            text = if (session.usedOnlineContext) "📡 Online" else "📴 Offline",
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = if (session.usedOnlineContext) Color(0xFF4F46E5) else Color(0xFF64748B),
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
                                 }
                             }
                         }

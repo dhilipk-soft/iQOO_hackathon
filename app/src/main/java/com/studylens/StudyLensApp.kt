@@ -61,6 +61,8 @@ class StudyLensApp : Application() {
         usageCollector = UsageCollector(this, database)
         notificationCollector = NotificationCollector(this, database)
         Log.d(TAG, "Focus collectors (UsageCollector & NotificationCollector) initialized.")
+
+        com.studylens.ai.ChatEnrichmentWorker.enqueue(this)
     }
 
     companion object {

@@ -93,35 +93,41 @@ class RetrievalClient {
             Log.w(TAG, "Groq: no API key configured, skipping")
             return null
         }
-        return try {
-            val result = withTimeoutOrNull(6000L) {
-                val response = groqApi.queryOnlineContext(
-                    apiKey = "Bearer $apiKey",
-                    request = hashMapOf(
-                        // compound-mini, not the full compound model - it does less internal
-                        // tool-call orchestration, so it's more likely to finish inside our
-                        // timeout budget. Full compound was observed hanging past 6s doing its
-                        // own agentic web-search loop internally.
-                        "model" to "groq/compound-mini",
-                        "max_tokens" to 700,
-                        "temperature" to 0.3,
-                        "messages" to listOf(
-                            mapOf(
-                                "role" to "system",
-                                "content" to RETRIEVAL_SYSTEM_PROMPT
-                            ),
-                            mapOf("role" to "user", "content" to "Topic: $topic")
+        val groqModels = listOf(
+            "qwen/qwen3.8-27b",
+            "openai/gpt-oss-120b",
+            "openai/gpt-oss-20b",
+            "groq/compound-mini"
+        )
+        for (model in groqModels) {
+            try {
+                val result = withTimeoutOrNull(6000L) {
+                    val response = groqApi.queryOnlineContext(
+                        apiKey = "Bearer $apiKey",
+                        request = hashMapOf(
+                            "model" to model,
+                            "max_tokens" to 700,
+                            "temperature" to 0.3,
+                            "messages" to listOf(
+                                mapOf(
+                                    "role" to "system",
+                                    "content" to RETRIEVAL_SYSTEM_PROMPT
+                                ),
+                                mapOf("role" to "user", "content" to "Topic: $topic")
+                            )
                         )
                     )
-                )
-                extractGroqResult(response)
+                    extractGroqResult(response)
+                }
+                if (result != null && result.factsText.isNotBlank()) {
+                    Log.i(TAG, "Groq model $model succeeded (${result.factsText.length} chars)")
+                    return result
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Groq model $model failed: ${e.javaClass.simpleName}: ${e.message}")
             }
-            if (result == null) Log.w(TAG, "Groq: timed out after 6s")
-            result
-        } catch (e: Exception) {
-            Log.w(TAG, "Groq failed: ${e.javaClass.simpleName}: ${e.message}")
-            null // Groq unavailable/erroring - caller falls back to OpenRouter
         }
+        return null
     }
 
     private suspend fun fetchOpenRouterContext(topic: String, apiKey: String): RetrievalResult {

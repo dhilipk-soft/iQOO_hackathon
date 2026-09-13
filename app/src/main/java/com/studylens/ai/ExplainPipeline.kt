@@ -88,29 +88,33 @@ class ExplainPipeline(
             RetrievalResult("")
         }
 
-        // Keep only the most recent part of a long-running conversation so the prompt stays
-        // small enough to leave the model room to actually answer.
-        val trimmedContext = conversationContext.takeLast(1500)
+        // Keep only recent context (last 350 chars) so the on-device SLM stays comfortably
+        // within prefill limits and avoids KV cache overflow.
+        val trimmedContext = conversationContext.takeLast(350).trim()
 
         val prompt = buildString {
-            append("You are continuing a tutoring conversation. Here is the conversation so far:\n")
-            append("$trimmedContext\n\n")
-            append("The student now asks: \"$question\"\n\n")
+            append("You are StudyLens, a knowledgeable and friendly educational AI tutor.\n\n")
+            append("Student's Question:\n\"$question\"\n\n")
+
             if (retrieval.factsText.isNotBlank()) {
-                append("Answer this new question thoroughly and in detail (aim for 10-15 sentences), ")
-                append("weaving together the current information below WITH your own knowledge - actually ")
-                append("synthesize it into a real explanation, don't just list the facts. ")
+                append("Live Information & Enriched Facts:\n")
+                append("${retrieval.factsText.trim()}\n\n")
+                append("Task: Explain the answer to \"$question\" thoroughly and clearly for the student, incorporating the live facts above.\n")
             } else {
-                append("Answer this new question directly and thoroughly (aim for 5-8 sentences where the ")
-                append("topic warrants it). ")
+                append("Task: Explain the answer to \"$question\" clearly, thoroughly, and directly for the student using your knowledge.\n")
             }
-            append("Use the conversation above for context ONLY if the new question is actually related ")
-            append("to it - if it's a new, unrelated topic, just answer it on its own terms using your own ")
-            append("knowledge. Do not repeat the question back, and do not just restate earlier answers.")
-            if (retrieval.factsText.isNotBlank()) {
-                append("\n\nCurrent information from multiple sources - use this to make the answer richer ")
-                append("and more up to date:\n${retrieval.factsText}")
+
+            append("Guidelines:\n")
+            append("- Focus completely on answering \"$question\". Provide a clear definition, core principles, and helpful examples.\n")
+            append("- If this is a new question or topic, explain it directly. Do NOT repeat, summarize, or revert to earlier topics unless specifically asked to compare them.\n")
+            append("- Do NOT start with \"Based on the context you provided\" or mention these system guidelines.\n\n")
+
+            if (trimmedContext.isNotBlank()) {
+                append("Earlier Conversation (for background reference only, if the question refers to previous messages):\n")
+                append("$trimmedContext\n\n")
             }
+
+            append("Tutor explanation for student:")
         }
         val answer = llmEngine.generateResponse(prompt)
 
