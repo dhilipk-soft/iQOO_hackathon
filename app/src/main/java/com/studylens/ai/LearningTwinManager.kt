@@ -73,6 +73,22 @@ class LearningTwinManager(private val database: AppDatabase) {
         return dao.createProfile(profile)
     }
 
+    suspend fun updateStudentProfile(profile: StudentProfileEntity) {
+        dao.updateProfile(profile)
+    }
+
+    suspend fun deleteStudentProfile(studentId: String) {
+        dao.deleteProfile(studentId)
+    }
+
+    suspend fun seedDemoPresentationData() {
+        dao.seedDemoPresentationData()
+    }
+
+    suspend fun clearAllData() {
+        dao.clearAllData()
+    }
+
     suspend fun registerChatTopic(subject: String, topic: String, concept: String, sourceSessionId: Long) {
         val studentId = activeProfileFlow.value?.id ?: return
         dao.registerConceptFromChat(

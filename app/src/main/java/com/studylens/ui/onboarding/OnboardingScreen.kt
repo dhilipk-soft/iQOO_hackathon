@@ -278,7 +278,7 @@ fun OnboardingScreen(
                                 OutlinedTextField(
                                     value = name,
                                     onValueChange = { name = it },
-                                    placeholder = { Text("e.g. Aarav Sharma or Priya Patel") },
+                                    placeholder = { Text("e.g. Alex, Rohan, or Jordan") },
                                     modifier = Modifier.fillMaxWidth(),
                                     shape = RoundedCornerShape(10.dp),
                                     singleLine = true

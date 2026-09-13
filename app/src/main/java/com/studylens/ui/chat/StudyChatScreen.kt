@@ -75,6 +75,8 @@ import kotlinx.coroutines.withContext
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun StudyChatScreen(
+    activeProfile: com.studylens.input.data.StudentProfileEntity? = null,
+    onOpenProfileDialog: () -> Unit = {},
     activeSession: StudyTopicSession?,
     sessionHistory: List<StudyTopicSession>,
     explanationResult: ExplanationResult?,
@@ -497,14 +499,21 @@ fun StudyChatScreen(
                                 HamburgerIcon(tint = Color(0xFF1E1B4B))
                             }
 
-                            // Center: Title
-                            Text(
-                                text = activeSession?.title ?: "StudyLens",
-                                color = Color(0xFF1E1B4B),
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1
-                            )
+                            // Center: Title or Profile Pill
+                            if (activeSession != null) {
+                                Text(
+                                    text = activeSession.title,
+                                    color = Color(0xFF1E1B4B),
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1
+                                )
+                            } else {
+                                com.studylens.ui.onboarding.ProfileTopBarPill(
+                                    activeProfile = activeProfile,
+                                    onClick = onOpenProfileDialog
+                                )
+                            }
 
                             // Right: Offline status badge (clickable to toggle simulation)
                             Surface(
@@ -662,6 +671,7 @@ fun StudyChatScreen(
                 } else if (activeSession == null && explanationResult == null && followUpList.isEmpty()) {
                     // Empty ChatGPT-Style Canvas
                     EmptyStudyCanvas(
+                        activeProfile = activeProfile,
                         onPromptClick = { promptText ->
                             inputText = promptText
                             onAskQuestion(promptText)
@@ -905,6 +915,7 @@ private fun rotateBitmapIfRequired(filePath: String, bitmap: Bitmap): Bitmap {
 
 @Composable
 fun EmptyStudyCanvas(
+    activeProfile: com.studylens.input.data.StudentProfileEntity? = null,
     onPromptClick: (String) -> Unit,
     onOpenMedia: () -> Unit,
     isMultimodalSupported: Boolean = true,
@@ -938,22 +949,29 @@ fun EmptyStudyCanvas(
             }
             Spacer(modifier = Modifier.height(14.dp))
             Text(
-                text = "How can I help you study?",
+                text = if (activeProfile != null) "Hello, ${activeProfile.name}!" else "How can I help you study?",
                 color = Color(0xFF1E1B4B),
-                fontSize = 20.sp,
+                fontSize = 21.sp,
                 fontWeight = FontWeight.Bold
             )
             Spacer(modifier = Modifier.height(6.dp))
             Text(
-                text = if (isMultimodalSupported) "Type a question, take a camera photo, or pick a suggestion" else "Type a question or pick a prompt suggestion",
+                text = if (activeProfile != null) {
+                    "Personal AI Tutor for ${activeProfile.institution} (${activeProfile.stream}) • Target: ${activeProfile.targetExam}"
+                } else if (isMultimodalSupported) {
+                    "Type a question, take a camera photo, or pick a suggestion"
+                } else {
+                    "Type a question or pick a prompt suggestion"
+                },
                 color = Color(0xFF64748B),
-                fontSize = 13.sp
+                fontSize = 12.sp,
+                textAlign = TextAlign.Center
             )
         }
 
         Spacer(modifier = Modifier.weight(1f))
 
-        // Prompt Suggestions
+        // Prompt Suggestions - Tailored to student's enrolled subjects
         Column(
             verticalArrangement = Arrangement.spacedBy(10.dp),
             modifier = Modifier
@@ -962,25 +980,32 @@ fun EmptyStudyCanvas(
             if (isMultimodalSupported) {
                 PromptActionChip(
                     icon = "📷",
-                    text = "Scan textbook page with Camera",
+                    text = "Scan textbook problem with Camera",
                     onClick = onOpenMedia
                 )
-            } else {
+            }
+
+            val userSubjects = activeProfile?.subjects ?: listOf("Physics", "Mathematics")
+            if (userSubjects.isNotEmpty()) {
+                val s1 = userSubjects.first()
                 PromptActionChip(
-                    icon = "💬",
-                    text = "Explain a science or math concept",
-                    onClick = { onPromptClick("Explain Photosynthesis in simple terms") }
+                    icon = "💡",
+                    text = "Explain core concepts in $s1",
+                    onClick = { onPromptClick("Explain the fundamental concepts in $s1 step-by-step") }
+                )
+            }
+            if (userSubjects.size > 1) {
+                val s2 = userSubjects[1]
+                PromptActionChip(
+                    icon = "✍️",
+                    text = "Practice problem solving in $s2",
+                    onClick = { onPromptClick("Give me a challenging problem to solve in $s2 and guide me Socratically") }
                 )
             }
             PromptActionChip(
-                icon = "✍️",
-                text = "Explain Quadratic Equation & formula",
-                onClick = { onPromptClick("Explain Quadratic Equation and how to solve it") }
-            )
-            PromptActionChip(
                 icon = "📝",
-                text = "Take a practice quiz on algebra",
-                onClick = { onPromptClick("Give me a quick practice quiz") }
+                text = "Take a diagnostic check for ${activeProfile?.targetExam ?: "my exam"}",
+                onClick = { onPromptClick("Give me a quick 3-question diagnostic quiz on my current topic") }
             )
         }
     }

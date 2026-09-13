@@ -245,7 +245,7 @@ private fun String.toStringList(): List<String> = if (isBlank()) emptyList() els
 // SQLite schema
 // ----------------------------------------------------
 
-class DbHelper(context: Context) : SQLiteOpenHelper(context, "studylens_db", null, 4) {
+class DbHelper(context: Context) : SQLiteOpenHelper(context, "studylens_db", null, 6) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
             """CREATE TABLE study_captures (
@@ -422,7 +422,6 @@ class DbHelper(context: Context) : SQLiteOpenHelper(context, "studylens_db", nul
                 isCompleted INTEGER NOT NULL DEFAULT 0
             )"""
         )
-        seedLearningTwinData(db)
     }
 
     override fun onOpen(db: SQLiteDatabase) {
@@ -544,10 +543,9 @@ class DbHelper(context: Context) : SQLiteOpenHelper(context, "studylens_db", nul
                 isCompleted INTEGER NOT NULL DEFAULT 0
             )"""
         )
-        seedLearningTwinData(db)
     }
 
-    private fun seedLearningTwinData(db: SQLiteDatabase) {
+    fun seedLearningTwinData(db: SQLiteDatabase) {
         val countCursor = db.rawQuery("SELECT COUNT(*) FROM student_profiles", null)
         var count = 0
         if (countCursor.moveToFirst()) {
@@ -1166,6 +1164,85 @@ class LearningTwinDao(private val helper: DbHelper) {
         try {
             helper.writableDatabase.execSQL("UPDATE student_profiles SET isCurrent = 0")
             helper.writableDatabase.execSQL("UPDATE student_profiles SET isCurrent = 1 WHERE id = ?", arrayOf(studentId))
+            helper.writableDatabase.setTransactionSuccessful()
+        } finally {
+            helper.writableDatabase.endTransaction()
+        }
+        refreshStateSafe()
+    }
+
+    suspend fun updateProfile(profile: StudentProfileEntity) = withContext(Dispatchers.IO) {
+        val values = ContentValues().apply {
+            put("name", profile.name)
+            put("institution", profile.institution)
+            put("stream", profile.stream)
+            put("subjects", profile.subjects.toDbString())
+            put("targetExam", profile.targetExam)
+            put("examDate", profile.examDate)
+            put("dailyMinutes", profile.dailyMinutes)
+            put("learningStyle", profile.learningStyle)
+            put("strengths", profile.strengths)
+            put("weaknesses", profile.weaknesses)
+        }
+        helper.writableDatabase.update("student_profiles", values, "id = ?", arrayOf(profile.id))
+
+        val now = System.currentTimeMillis()
+        val days = if (profile.examDate > now) {
+            ((profile.examDate - now) / 86400000L).coerceAtLeast(1).toInt()
+        } else {
+            30
+        }
+        val planValues = ContentValues().apply {
+            put("examName", profile.targetExam.ifBlank { "Target Exam" })
+            put("daysRemaining", days)
+            put("dailyMinutes", profile.dailyMinutes.coerceAtLeast(15))
+        }
+        helper.writableDatabase.update("exam_plans", planValues, "studentId = ?", arrayOf(profile.id))
+        refreshStateSafe()
+    }
+
+    suspend fun deleteProfile(studentId: String) = withContext(Dispatchers.IO) {
+        helper.writableDatabase.beginTransaction()
+        try {
+            helper.writableDatabase.delete("student_profiles", "id = ?", arrayOf(studentId))
+            helper.writableDatabase.delete("concept_mastery", "studentId = ?", arrayOf(studentId))
+            helper.writableDatabase.delete("misconception_logs", "studentId = ?", arrayOf(studentId))
+            helper.writableDatabase.delete("exam_plans", "studentId = ?", arrayOf(studentId))
+            helper.writableDatabase.delete("quiz_attempts", "studentId = ?", arrayOf(studentId))
+            helper.writableDatabase.delete("pending_quizzes", "studentId = ?", arrayOf(studentId))
+            helper.writableDatabase.delete("chat_sessions", "studentId = ?", arrayOf(studentId))
+            helper.writableDatabase.delete("study_sessions", "studentId = ?", arrayOf(studentId))
+
+            val remaining = queryAllProfiles()
+            if (remaining.isNotEmpty()) {
+                helper.writableDatabase.execSQL("UPDATE student_profiles SET isCurrent = 1 WHERE id = ?", arrayOf(remaining.first().id))
+            }
+            helper.writableDatabase.setTransactionSuccessful()
+        } finally {
+            helper.writableDatabase.endTransaction()
+        }
+        refreshStateSafe()
+    }
+
+    suspend fun seedDemoPresentationData() = withContext(Dispatchers.IO) {
+        helper.seedLearningTwinData(helper.writableDatabase)
+        refreshStateSafe()
+    }
+
+    suspend fun clearAllData() = withContext(Dispatchers.IO) {
+        helper.writableDatabase.beginTransaction()
+        try {
+            helper.writableDatabase.execSQL("DELETE FROM student_profiles")
+            helper.writableDatabase.execSQL("DELETE FROM concept_mastery")
+            helper.writableDatabase.execSQL("DELETE FROM misconception_logs")
+            helper.writableDatabase.execSQL("DELETE FROM exam_plans")
+            helper.writableDatabase.execSQL("DELETE FROM quiz_attempts")
+            helper.writableDatabase.execSQL("DELETE FROM pending_quizzes")
+            helper.writableDatabase.execSQL("DELETE FROM chat_sessions")
+            helper.writableDatabase.execSQL("DELETE FROM chat_messages")
+            helper.writableDatabase.execSQL("DELETE FROM study_sessions")
+            helper.writableDatabase.execSQL("DELETE FROM focus_events")
+            helper.writableDatabase.execSQL("DELETE FROM focus_session_summaries")
             helper.writableDatabase.setTransactionSuccessful()
         } finally {
             helper.writableDatabase.endTransaction()

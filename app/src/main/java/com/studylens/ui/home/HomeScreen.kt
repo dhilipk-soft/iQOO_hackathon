@@ -3,6 +3,7 @@ package com.studylens.ui.home
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -43,6 +44,8 @@ enum class IconType {
 
 @Composable
 fun HomeScreen(
+    activeProfile: com.studylens.input.data.StudentProfileEntity? = null,
+    onOpenProfileDialog: () -> Unit = {},
     onGetStarted: () -> Unit,
     isFocusModeActive: Boolean = false,
     onTriggerIntentToSwitch: () -> Unit = {},
@@ -162,7 +165,62 @@ fun HomeScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Spacer(modifier = Modifier.height(28.dp))
+                if (activeProfile != null) {
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = Color.White,
+                        border = ButtonDefaults.outlinedButtonBorder.copy(
+                            brush = Brush.horizontalGradient(listOf(Color(0xFFE0E7FF), Color(0xFFEDE9FE))),
+                            width = 1.dp
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onOpenProfileDialog() }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF4F46E5)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = activeProfile.name.take(1).uppercase(),
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 16.sp
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Welcome, ${activeProfile.name}!",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF1E1B4B)
+                                )
+                                Text(
+                                    text = "${activeProfile.institution} (${activeProfile.stream}) • ${activeProfile.targetExam}",
+                                    fontSize = 11.sp,
+                                    color = Color(0xFF64748B)
+                                )
+                            }
+                            Text(
+                                text = "Switch ▾",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF4F46E5)
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
 
                 // Hero Logo: Brackets with open book inside
                 StudyLensHeroLogo(
@@ -230,7 +288,7 @@ fun HomeScreen(
                         horizontalArrangement = Arrangement.Center
                     ) {
                         Text(
-                            text = "Get Started",
+                            text = if (activeProfile != null) "Continue to Study Chat" else "Set Up Your Personal AI Tutor",
                             color = Color.White,
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Bold

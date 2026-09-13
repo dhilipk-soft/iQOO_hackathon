@@ -230,6 +230,30 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun updateStudentProfile(profile: com.studylens.input.data.StudentProfileEntity) {
+        viewModelScope.launch {
+            learningTwinManager.updateStudentProfile(profile)
+        }
+    }
+
+    fun deleteStudentProfile(studentId: String) {
+        viewModelScope.launch {
+            learningTwinManager.deleteStudentProfile(studentId)
+        }
+    }
+
+    fun seedDemoPresentationData() {
+        viewModelScope.launch {
+            learningTwinManager.seedDemoPresentationData()
+        }
+    }
+
+    fun clearAllData() {
+        viewModelScope.launch {
+            learningTwinManager.clearAllData()
+        }
+    }
+
     fun startQuizForPendingConcept(pending: com.studylens.input.data.PendingQuizEntity) {
         _capturedText.value = "${pending.concept}: ${pending.topic}"
         generatePracticeQuiz()

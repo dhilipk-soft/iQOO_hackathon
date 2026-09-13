@@ -8,7 +8,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -24,10 +24,39 @@ import androidx.compose.ui.unit.sp
 
 @Composable
 fun SettingsScreen(
+    activeProfile: com.studylens.input.data.StudentProfileEntity? = null,
     onNavigateToModelPicker: () -> Unit = {},
     onNavigateToProfile: () -> Unit = {},
+    onLoadDemoData: () -> Unit = {},
+    onClearAllData: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    var showResetConfirm by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+
+    if (showResetConfirm) {
+        AlertDialog(
+            onDismissRequest = { showResetConfirm = false },
+            title = { Text("Reset All Data?", fontWeight = FontWeight.Bold) },
+            text = { Text("This will permanently clear all student profiles, chat history, focus records, and twin mastery on this device.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onClearAllData()
+                        showResetConfirm = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444))
+                ) {
+                    Text("Clear Everything")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showResetConfirm = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -43,14 +72,64 @@ fun SettingsScreen(
             contentAlignment = Alignment.Center
         ) {
             Text(
-                text = "Settings",
+                text = "Settings & Profile",
                 color = Color(0xFF1E1B4B),
                 fontSize = 18.sp,
                 fontWeight = FontWeight.Bold
             )
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(16.dp))
+
+        if (activeProfile != null) {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = Color.White,
+                shape = RoundedCornerShape(16.dp),
+                border = ButtonDefaults.outlinedButtonBorder.copy(
+                    brush = Brush.horizontalGradient(listOf(Color(0xFFE0E7FF), Color(0xFFEDE9FE))),
+                    width = 1.dp
+                ),
+                shadowElevation = 1.dp
+            ) {
+                Row(
+                    modifier = Modifier.padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(42.dp)
+                            .background(Color(0xFF4F46E5), CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = activeProfile.name.take(1).uppercase(),
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = activeProfile.name,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp,
+                            color = Color(0xFF1E1B4B)
+                        )
+                        Text(
+                            text = "${activeProfile.institution} (${activeProfile.stream}) • ${activeProfile.targetExam}",
+                            fontSize = 11.sp,
+                            color = Color(0xFF64748B)
+                        )
+                    }
+                    TextButton(onClick = onNavigateToProfile) {
+                        Text("Switch", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4F46E5))
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+        }
 
         // Settings Items Card (Image 1 Screen 9)
         Surface(
@@ -67,7 +146,7 @@ fun SettingsScreen(
                 SettingsRowItem(
                     iconBg = Color(0xFFE0E7FF),
                     icon = "👤",
-                    title = "Student Profile & Streams",
+                    title = "Student Accounts & Onboarding",
                     onClick = onNavigateToProfile
                 )
 
@@ -83,27 +162,27 @@ fun SettingsScreen(
                 HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
 
                 SettingsRowItem(
+                    iconBg = Color(0xFFFEF3C7),
+                    icon = "⚡",
+                    title = "Reviewer Mode: Load Sample Data",
+                    onClick = onLoadDemoData
+                )
+
+                HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
+
+                SettingsRowItem(
+                    iconBg = Color(0xFFFEE2E2),
+                    icon = "🗑️",
+                    title = "Reset All Data / Start Clean",
+                    onClick = { showResetConfirm = true }
+                )
+
+                HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
+
+                SettingsRowItem(
                     iconBg = Color(0xFFEEF2FF),
                     icon = "ℹ️",
-                    title = "About StudyLens",
-                    onClick = {}
-                )
-
-                HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
-
-                SettingsRowItem(
-                    iconBg = Color(0xFFEDE9FE),
-                    icon = "🛡️",
-                    title = "Privacy",
-                    onClick = {}
-                )
-
-                HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
-
-                SettingsRowItem(
-                    iconBg = Color(0xFFE0E7FF),
-                    icon = "💬",
-                    title = "Help & Feedback",
+                    title = "About StudyLens On-Device AI",
                     onClick = {}
                 )
             }

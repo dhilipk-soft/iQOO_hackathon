@@ -19,6 +19,7 @@ import androidx.compose.ui.unit.sp
 import com.studylens.input.data.ConceptMasteryEntity
 import com.studylens.input.data.ExamPlanEntity
 import com.studylens.input.data.StudentProfileEntity
+import com.studylens.ui.onboarding.ProfileTopBarPill
 
 @Composable
 fun ExamPlannerScreen(
@@ -26,7 +27,7 @@ fun ExamPlannerScreen(
     examPlan: ExamPlanEntity?,
     conceptMasteries: List<ConceptMasteryEntity>,
     onUpdateExamPlan: (daysRemaining: Int, dailyMinutes: Int, planBreakdown: String, targetScore: Int) -> Unit = { _, _, _, _ -> },
-    onOpenOnboarding: () -> Unit = {},
+    onOpenProfileDialog: () -> Unit = {},
     onLaunchStudySession: () -> Unit
 ) {
     var showEditDialog by remember { mutableStateOf(false) }
@@ -130,33 +131,36 @@ fun ExamPlannerScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = "Exam-Aware Adaptive Planner",
-                        fontSize = 20.sp,
+                        fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color(0xFF1E293B)
                     )
                     Text(
                         text = "Dynamic Schedule Driven by Your Input & Mastery",
-                        fontSize = 12.sp,
+                        fontSize = 11.sp,
                         color = Color(0xFF64748B)
                     )
                 }
 
-                TextButton(onClick = onOpenOnboarding) {
-                    Text(
-                        text = "+ Switch Profile",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF4F46E5)
-                    )
-                }
+                ProfileTopBarPill(
+                    activeProfile = activeProfile,
+                    onClick = onOpenProfileDialog
+                )
             }
         }
 
         // 2. Exam Target Card with Edit button
         item {
+            val now = System.currentTimeMillis()
+            val realDaysLeft = if ((activeProfile?.examDate ?: 0L) > now) {
+                ((activeProfile!!.examDate - now) / 86400000L).coerceAtLeast(1).toInt()
+            } else {
+                examPlan?.daysRemaining ?: 30
+            }
+
             Card(
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = Color.White),
@@ -187,7 +191,7 @@ fun ExamPlannerScreen(
                             color = Color(0xFFEEF2FF)
                         ) {
                             Text(
-                                text = "${examPlan?.daysRemaining ?: 30}d left",
+                                text = "${realDaysLeft}d left",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color(0xFF4F46E5),
@@ -293,8 +297,16 @@ fun ExamPlannerScreen(
             )
         }
 
+        val subject1 = activeProfile?.subjects?.getOrNull(0) ?: "Core Subjects"
+        val subject2 = activeProfile?.subjects?.getOrNull(1) ?: "Active Practice"
+        val totalMins = examPlan?.dailyMinutes ?: activeProfile?.dailyMinutes ?: 60
+        val defaultBlocks = listOf(
+            "${totalMins / 3}m Socratic Exploration & Problem Solving ($subject1)",
+            "${totalMins / 3}m Weak Concept Reinforcement ($subject2)",
+            "${totalMins / 3}m Spaced Diagnostic Quiz"
+        )
         val blocks = examPlan?.currentDayPlan?.split("|||")?.map { it.trim() }?.filter { it.isNotEmpty() }
-            ?: listOf("20m Core Foundation Review", "25m Guided Socratic Practice", "15m Diagnostic Quiz Check")
+            ?: defaultBlocks
 
         items(blocks.size) { index ->
             val block = blocks[index]

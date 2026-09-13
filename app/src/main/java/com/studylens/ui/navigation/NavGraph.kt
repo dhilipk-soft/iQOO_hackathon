@@ -39,6 +39,7 @@ import com.studylens.ui.settings.SettingsScreen
 import com.studylens.ui.twin.LearningTwinScreen
 import com.studylens.ui.planner.ExamPlannerScreen
 import com.studylens.ui.onboarding.OnboardingScreen
+import com.studylens.ui.onboarding.ProfileManagementDialog
 
 sealed class Screen(val route: String, val label: String) {
     object Home : Screen("home", "Home")
@@ -96,6 +97,19 @@ fun NavGraph(
     val pendingQuizzes by actualViewModel.pendingQuizzes.collectAsState()
     val quizAttempts by actualViewModel.quizAttempts.collectAsState()
 
+    var showProfileDialog by remember { mutableStateOf(false) }
+
+    val navBackStackEntry by navController.currentBackStackEntryAsState()
+    val currentRoute = navBackStackEntry?.destination?.route
+
+    LaunchedEffect(allProfiles) {
+        if (allProfiles.isEmpty() && currentRoute != Screen.Onboarding.route) {
+            navController.navigate(Screen.Onboarding.route) {
+                popUpTo(0) { inclusive = true }
+            }
+        }
+    }
+
     val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
@@ -114,8 +128,6 @@ fun NavGraph(
         }
     }
 
-    val navBackStackEntry by navController.currentBackStackEntryAsState()
-    val currentRoute = navBackStackEntry?.destination?.route
     val isWelcomeHome = currentRoute == Screen.Home.route
     val isWelcomeOrOnboarding = isWelcomeHome || currentRoute == Screen.Onboarding.route
 
@@ -326,6 +338,8 @@ fun NavGraph(
                     Log.d("NavGraph", "Navigated to Screen.Home")
                 }
                 HomeScreen(
+                    activeProfile = activeStudentProfile,
+                    onOpenProfileDialog = { showProfileDialog = true },
                     onGetStarted = {
                         navController.navigate(Screen.StudyChat.route)
                     },
@@ -342,6 +356,8 @@ fun NavGraph(
                     Log.d("NavGraph", "Navigated to Screen.StudyChat")
                 }
                 StudyChatScreen(
+                    activeProfile = activeStudentProfile,
+                    onOpenProfileDialog = { showProfileDialog = true },
                     activeSession = activeSession,
                     sessionHistory = sessionHistory,
                     explanationResult = explanationResult,
@@ -486,11 +502,18 @@ fun NavGraph(
                     Log.d("NavGraph", "Navigated to Screen.Settings")
                 }
                 SettingsScreen(
+                    activeProfile = activeStudentProfile,
                     onNavigateToModelPicker = {
                         navController.navigate(Screen.ModelPicker.route)
                     },
                     onNavigateToProfile = {
-                        navController.navigate(Screen.Onboarding.route)
+                        showProfileDialog = true
+                    },
+                    onLoadDemoData = {
+                        actualViewModel.seedDemoPresentationData()
+                    },
+                    onClearAllData = {
+                        actualViewModel.clearAllData()
                     }
                 )
             }
@@ -518,8 +541,7 @@ fun NavGraph(
                         actualViewModel.startQuizForPendingConcept(pending)
                         navController.navigate(Screen.Quiz.route)
                     },
-                    onOpenOnboarding = { navController.navigate(Screen.Onboarding.route) },
-                    onResetDemo = { actualViewModel.resetLearningTwinDemoData() },
+                    onOpenProfileDialog = { showProfileDialog = true },
                     onStartSocraticChat = { navController.navigate(Screen.StudyChat.route) }
                 )
             }
@@ -533,7 +555,7 @@ fun NavGraph(
                     onUpdateExamPlan = { days, mins, plan, target ->
                         actualViewModel.updateExamPlan(days, mins, plan, target)
                     },
-                    onOpenOnboarding = { navController.navigate(Screen.Onboarding.route) },
+                    onOpenProfileDialog = { showProfileDialog = true },
                     onLaunchStudySession = { navController.navigate(Screen.StudyChat.route) }
                 )
             }
@@ -543,13 +565,24 @@ fun NavGraph(
                 OnboardingScreen(
                     viewModel = actualViewModel,
                     onFinish = {
-                        navController.navigate(Screen.LearningTwin.route) {
+                        navController.navigate(Screen.StudyChat.route) {
                             popUpTo(Screen.Onboarding.route) { inclusive = true }
                         }
                     }
                 )
             }
         }
+    }
+
+    if (showProfileDialog) {
+        ProfileManagementDialog(
+            viewModel = actualViewModel,
+            onDismiss = { showProfileDialog = false },
+            onAddNewProfile = {
+                showProfileDialog = false
+                navController.navigate(Screen.Onboarding.route)
+            }
+        )
     }
 
     FocusGuardDialogHost(

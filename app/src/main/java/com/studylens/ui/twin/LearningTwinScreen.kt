@@ -28,6 +28,8 @@ import com.studylens.input.data.PendingQuizEntity
 import com.studylens.input.data.QuizAttemptEntity
 import com.studylens.input.data.StudentProfileEntity
 
+import com.studylens.ui.onboarding.ProfileTopBarPill
+
 @Composable
 fun LearningTwinScreen(
     activeProfile: StudentProfileEntity?,
@@ -38,8 +40,8 @@ fun LearningTwinScreen(
     quizAttempts: List<QuizAttemptEntity> = emptyList(),
     onSwitchProfile: (String) -> Unit,
     onStartQuiz: (PendingQuizEntity) -> Unit = {},
-    onOpenOnboarding: () -> Unit = {},
-    onResetDemo: () -> Unit,
+    onOpenProfileDialog: () -> Unit = {},
+    onResetDemo: () -> Unit = {},
     onStartSocraticChat: () -> Unit
 ) {
     var selectedTab by remember { mutableStateOf(0) }
@@ -64,44 +66,24 @@ fun LearningTwinScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column {
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = "Personal Learning Twin",
-                                fontSize = 20.sp,
+                                fontSize = 18.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color(0xFF1E293B)
                             )
                             Text(
                                 text = "Adaptive Student Engine • Isolated Profile",
-                                fontSize = 12.sp,
+                                fontSize = 11.sp,
                                 color = Color(0xFF64748B)
                             )
                         }
 
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            TextButton(onClick = onOpenOnboarding) {
-                                Text(
-                                    text = "+ Switch / Add",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF4F46E5)
-                                )
-                            }
-                            IconButton(
-                                onClick = onResetDemo,
-                                modifier = Modifier
-                                    .size(32.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(0xFFF1F5F9))
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Refresh,
-                                    contentDescription = "Reset Demo",
-                                    tint = Color(0xFF4F46E5),
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
-                        }
+                        ProfileTopBarPill(
+                            activeProfile = activeProfile,
+                            onClick = onOpenProfileDialog
+                        )
                     }
 
                     if (allProfiles.isNotEmpty()) {
