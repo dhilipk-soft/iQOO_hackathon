@@ -41,6 +41,7 @@ import com.studylens.ui.tts.TtsManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
@@ -183,9 +184,12 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
     // Personal Learning Twin & Socratic Mode State
     // ----------------------------------------------------
     val activeStudentProfile = learningTwinManager.activeProfileFlow
+    val allStudentProfiles = learningTwinManager.allProfilesFlow
     val conceptMasteryList = learningTwinManager.conceptMasteryFlow
     val misconceptionsList = learningTwinManager.misconceptionsFlow
     val activeExamPlan = learningTwinManager.activeExamPlanFlow
+    val quizAttempts = learningTwinManager.quizAttemptsFlow
+    val pendingQuizzes = learningTwinManager.pendingQuizzesFlow
 
     private val _isSocraticMode = MutableStateFlow(true)
     val isSocraticMode: StateFlow<Boolean> = _isSocraticMode.asStateFlow()
@@ -202,6 +206,33 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             learningTwinManager.switchStudentProfile(studentId)
         }
+    }
+
+    fun createStudentProfile(
+        name: String,
+        institution: String,
+        stream: String,
+        subjects: List<String>,
+        targetExam: String,
+        examDate: Long,
+        dailyMinutes: Int
+    ) {
+        viewModelScope.launch {
+            learningTwinManager.createStudentProfile(
+                name = name,
+                institution = institution,
+                stream = stream,
+                subjects = subjects,
+                targetExam = targetExam,
+                examDate = examDate,
+                dailyMinutes = dailyMinutes
+            )
+        }
+    }
+
+    fun startQuizForPendingConcept(pending: com.studylens.input.data.PendingQuizEntity) {
+        _capturedText.value = "${pending.concept}: ${pending.topic}"
+        generatePracticeQuiz()
     }
 
     fun resetLearningTwinDemoData() {
@@ -221,9 +252,9 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun updateExamPlan(daysRemaining: Int, dailyMinutes: Int, planBreakdown: String) {
+    fun updateExamPlan(daysRemaining: Int, dailyMinutes: Int, planBreakdown: String, targetScore: Int = 90) {
         viewModelScope.launch {
-            learningTwinManager.updateExamPlan(daysRemaining, dailyMinutes, planBreakdown)
+            learningTwinManager.updateExamPlan(daysRemaining, dailyMinutes, planBreakdown, targetScore)
         }
     }
 
@@ -265,8 +296,15 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
         // Load real chat history from Room - this is the persistence layer (ChatGPT-style).
         // Any insert elsewhere (explainCurrentCapture) makes this Flow re-emit automatically.
         viewModelScope.launch {
-            chatDao.getAllSessions().collect { entities ->
-                _sessionHistory.value = entities.map { it.toDomain() }
+            combine(chatDao.getAllSessions(), activeStudentProfile) { entities, profile ->
+                val currentId = profile?.id
+                if (currentId.isNullOrBlank()) {
+                    entities.map { it.toDomain() }
+                } else {
+                    entities.filter { it.studentId.isBlank() || it.studentId == currentId }.map { it.toDomain() }
+                }
+            }.collect { list ->
+                _sessionHistory.value = list
             }
         }
 
@@ -416,8 +454,10 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
 
             // Persist to Room - this is the real "remembers previous chats" storage.
             // The sessionHistory Flow (collected in init) picks this up automatically.
+            val currentStudentId = activeStudentProfile.value?.id ?: ""
             val dbId = chatDao.insertSession(
                 ChatSessionEntity(
+                    studentId = currentStudentId,
                     title = topicTitle,
                     subject = topicSubject,
                     previewText = textToProcess,
@@ -427,6 +467,14 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
                     usedOnlineContext = result.usedOnlineContext,
                     timestamp = startTime
                 )
+            )
+
+            // Automatically link this chat topic into student's personal learning twin & diagnostic queue
+            learningTwinManager.registerChatTopic(
+                subject = topicSubject,
+                topic = topicTitle,
+                concept = topicTitle,
+                sourceSessionId = dbId
             )
 
             _activeSession.value = StudyTopicSession(
@@ -530,10 +578,28 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
         val answers = _selectedQuizAnswers.value
 
         val newWrongQuestions = mutableListOf<QuizQuestion>()
+        val conceptName = _activeSession.value?.title ?: _capturedText.value.take(25).ifBlank { "General Topic" }
+        val topicName = _activeSession.value?.subject ?: "Core Subject"
+
         for (q in questions) {
-            val userAnswer = answers[q.id]
-            if (userAnswer != q.correctAnswer) {
+            val userAnswer = answers[q.id] ?: "Not answered"
+            val isCorrect = userAnswer == q.correctAnswer
+            if (!isCorrect) {
                 newWrongQuestions.add(q)
+            }
+
+            // Record each quiz answer into the user's Learning Twin & update mastery
+            viewModelScope.launch {
+                learningTwinManager.recordQuizAttempt(
+                    concept = conceptName,
+                    topic = topicName,
+                    question = q.question,
+                    selectedAnswer = userAnswer,
+                    correctAnswer = q.correctAnswer,
+                    isCorrect = isCorrect,
+                    errorType = if (!isCorrect) "CONCEPTUAL_APPLICATION" else null,
+                    misconception = if (!isCorrect) "Struggled with: ${q.question.take(45)}..." else null
+                )
             }
         }
 

@@ -4,6 +4,8 @@ import com.studylens.input.data.AppDatabase
 import com.studylens.input.data.ConceptMasteryEntity
 import com.studylens.input.data.ExamPlanEntity
 import com.studylens.input.data.MisconceptionLogEntity
+import com.studylens.input.data.PendingQuizEntity
+import com.studylens.input.data.QuizAttemptEntity
 import com.studylens.input.data.StudentProfileEntity
 import kotlinx.coroutines.flow.StateFlow
 
@@ -34,20 +36,84 @@ class LearningTwinManager(private val database: AppDatabase) {
     private val dao = database.learningTwinDao()
 
     val activeProfileFlow: StateFlow<StudentProfileEntity?> = dao.activeProfileFlow
+    val allProfilesFlow: StateFlow<List<StudentProfileEntity>> = dao.allProfilesFlow
     val conceptMasteryFlow: StateFlow<List<ConceptMasteryEntity>> = dao.conceptMasteryFlow
     val misconceptionsFlow: StateFlow<List<MisconceptionLogEntity>> = dao.misconceptionsFlow
     val activeExamPlanFlow: StateFlow<ExamPlanEntity?> = dao.activeExamPlanFlow
+    val quizAttemptsFlow: StateFlow<List<QuizAttemptEntity>> = dao.quizAttemptsFlow
+    val pendingQuizzesFlow: StateFlow<List<PendingQuizEntity>> = dao.pendingQuizzesFlow
 
     suspend fun switchStudentProfile(studentId: String) {
         dao.setActiveProfile(studentId)
+    }
+
+    suspend fun createStudentProfile(
+        name: String,
+        institution: String,
+        stream: String,
+        subjects: List<String>,
+        targetExam: String,
+        examDate: Long,
+        dailyMinutes: Int
+    ): String {
+        val profile = StudentProfileEntity(
+            id = java.util.UUID.randomUUID().toString(),
+            name = name,
+            institution = institution,
+            stream = stream,
+            subjects = subjects,
+            targetExam = targetExam,
+            examDate = examDate,
+            dailyMinutes = dailyMinutes,
+            learningStyle = "Interactive & Adaptive",
+            strengths = "Curious learner, visual problem solver",
+            weaknesses = "",
+            isCurrent = true
+        )
+        return dao.createProfile(profile)
+    }
+
+    suspend fun registerChatTopic(subject: String, topic: String, concept: String, sourceSessionId: Long) {
+        val studentId = activeProfileFlow.value?.id ?: return
+        dao.registerConceptFromChat(
+            studentId = studentId,
+            subject = subject,
+            topic = topic,
+            concept = concept,
+            sourceChatSessionId = sourceSessionId
+        )
+    }
+
+    suspend fun recordQuizAttempt(
+        concept: String,
+        topic: String,
+        question: String,
+        selectedAnswer: String,
+        correctAnswer: String,
+        isCorrect: Boolean,
+        errorType: String? = null,
+        misconception: String? = null
+    ) {
+        val studentId = activeProfileFlow.value?.id ?: return
+        dao.recordQuizAttempt(
+            studentId = studentId,
+            concept = concept,
+            topic = topic,
+            question = question,
+            selectedAnswer = selectedAnswer,
+            correctAnswer = correctAnswer,
+            isCorrect = isCorrect,
+            errorType = errorType,
+            misconception = misconception
+        )
     }
 
     suspend fun resetDemoData() {
         dao.resetDemoData()
     }
 
-    suspend fun updateExamPlan(daysRemaining: Int, dailyMinutes: Int, planBreakdown: String) {
-        dao.updateExamPlan(daysRemaining, dailyMinutes, planBreakdown)
+    suspend fun updateExamPlan(daysRemaining: Int, dailyMinutes: Int, planBreakdown: String, targetScore: Int = 90) {
+        dao.updateExamPlan(daysRemaining, dailyMinutes, planBreakdown, targetScore)
     }
 
     fun computeNextBestAction(): NextLearningAction {
@@ -117,10 +183,12 @@ class LearningTwinManager(private val database: AppDatabase) {
 
         return buildString {
             append("=== [ON-DEVICE PERSONAL LEARNING TWIN ACTIVE] ===\n")
-            append("Student Profile: ${profile.name} (${profile.grade})\n")
+            append("Student Profile: ${profile.name} | Level: ${profile.institution} | Stream: ${profile.stream}\n")
+            append("Enrolled Subjects: ${profile.subjects.joinToString(", ")}\n")
+            append("Target Exam: ${profile.targetExam}\n")
             append("Cognitive Style: ${profile.learningStyle}\n")
-            append("Strengths: ${profile.strengths}\n")
-            append("Struggle Areas: ${profile.weaknesses}\n")
+            if (profile.strengths.isNotBlank()) append("Strengths: ${profile.strengths}\n")
+            if (profile.weaknesses.isNotBlank()) append("Struggle Areas: ${profile.weaknesses}\n")
             append("Concept Masteries: ")
             append(masteries.joinToString(", ") { "${it.concept}: ${it.masteryScore}%" })
             append("\n")

@@ -38,12 +38,14 @@ import com.studylens.ui.settings.ModelPickerScreen
 import com.studylens.ui.settings.SettingsScreen
 import com.studylens.ui.twin.LearningTwinScreen
 import com.studylens.ui.planner.ExamPlannerScreen
+import com.studylens.ui.onboarding.OnboardingScreen
 
 sealed class Screen(val route: String, val label: String) {
     object Home : Screen("home", "Home")
     object StudyChat : Screen("study_chat", "Home")
     object LearningTwin : Screen("learning_twin", "Twin")
     object ExamPlanner : Screen("exam_planner", "Planner")
+    object Onboarding : Screen("onboarding", "Profile")
     object Quiz : Screen("quiz", "Quiz")
     object QuizResult : Screen("quiz_result", "Quiz Result")
     object Revision : Screen("revision", "Revision")
@@ -87,9 +89,12 @@ fun NavGraph(
     val isSpeaking by actualViewModel.ttsManager.isSpeaking.collectAsState()
 
     val activeStudentProfile by actualViewModel.activeStudentProfile.collectAsState()
+    val allProfiles by actualViewModel.allStudentProfiles.collectAsState()
     val conceptMasteries by actualViewModel.conceptMasteryList.collectAsState()
     val misconceptions by actualViewModel.misconceptionsList.collectAsState()
     val examPlan by actualViewModel.activeExamPlan.collectAsState()
+    val pendingQuizzes by actualViewModel.pendingQuizzes.collectAsState()
+    val quizAttempts by actualViewModel.quizAttempts.collectAsState()
 
     val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
@@ -112,11 +117,12 @@ fun NavGraph(
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
     val isWelcomeHome = currentRoute == Screen.Home.route
+    val isWelcomeOrOnboarding = isWelcomeHome || currentRoute == Screen.Onboarding.route
 
     Scaffold(
         bottomBar = {
             // Consistent 3-tab Bottom Navigation Across All Inner Pages (Image 1 Bottom Banner)
-            if (!isWelcomeHome) {
+            if (!isWelcomeOrOnboarding) {
                 Surface(
                     color = Color.White,
                     shadowElevation = 8.dp,
@@ -482,6 +488,9 @@ fun NavGraph(
                 SettingsScreen(
                     onNavigateToModelPicker = {
                         navController.navigate(Screen.ModelPicker.route)
+                    },
+                    onNavigateToProfile = {
+                        navController.navigate(Screen.Onboarding.route)
                     }
                 )
             }
@@ -499,9 +508,17 @@ fun NavGraph(
             composable(Screen.LearningTwin.route) {
                 LearningTwinScreen(
                     activeProfile = activeStudentProfile,
+                    allProfiles = allProfiles,
                     conceptMasteries = conceptMasteries,
                     misconceptions = misconceptions,
+                    pendingQuizzes = pendingQuizzes,
+                    quizAttempts = quizAttempts,
                     onSwitchProfile = { actualViewModel.switchStudentProfile(it) },
+                    onStartQuiz = { pending ->
+                        actualViewModel.startQuizForPendingConcept(pending)
+                        navController.navigate(Screen.Quiz.route)
+                    },
+                    onOpenOnboarding = { navController.navigate(Screen.Onboarding.route) },
                     onResetDemo = { actualViewModel.resetLearningTwinDemoData() },
                     onStartSocraticChat = { navController.navigate(Screen.StudyChat.route) }
                 )
@@ -513,7 +530,23 @@ fun NavGraph(
                     activeProfile = activeStudentProfile,
                     examPlan = examPlan,
                     conceptMasteries = conceptMasteries,
+                    onUpdateExamPlan = { days, mins, plan, target ->
+                        actualViewModel.updateExamPlan(days, mins, plan, target)
+                    },
+                    onOpenOnboarding = { navController.navigate(Screen.Onboarding.route) },
                     onLaunchStudySession = { navController.navigate(Screen.StudyChat.route) }
+                )
+            }
+
+            // 11. Student Onboarding & Multi-User Profile Switcher Screen
+            composable(Screen.Onboarding.route) {
+                OnboardingScreen(
+                    viewModel = actualViewModel,
+                    onFinish = {
+                        navController.navigate(Screen.LearningTwin.route) {
+                            popUpTo(Screen.Onboarding.route) { inclusive = true }
+                        }
+                    }
                 )
             }
         }

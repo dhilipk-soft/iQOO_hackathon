@@ -6,6 +6,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -23,17 +24,26 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.studylens.input.data.ConceptMasteryEntity
 import com.studylens.input.data.MisconceptionLogEntity
+import com.studylens.input.data.PendingQuizEntity
+import com.studylens.input.data.QuizAttemptEntity
 import com.studylens.input.data.StudentProfileEntity
 
 @Composable
 fun LearningTwinScreen(
     activeProfile: StudentProfileEntity?,
+    allProfiles: List<StudentProfileEntity> = emptyList(),
     conceptMasteries: List<ConceptMasteryEntity>,
     misconceptions: List<MisconceptionLogEntity>,
+    pendingQuizzes: List<PendingQuizEntity> = emptyList(),
+    quizAttempts: List<QuizAttemptEntity> = emptyList(),
     onSwitchProfile: (String) -> Unit,
+    onStartQuiz: (PendingQuizEntity) -> Unit = {},
+    onOpenOnboarding: () -> Unit = {},
     onResetDemo: () -> Unit,
     onStartSocraticChat: () -> Unit
 ) {
+    var selectedTab by remember { mutableStateOf(0) }
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -41,7 +51,7 @@ fun LearningTwinScreen(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // 1. Header & Live Demo Persona Switcher
+        // 1. Header & Active Student Card
         item {
             Card(
                 shape = RoundedCornerShape(16.dp),
@@ -62,148 +72,106 @@ fun LearningTwinScreen(
                                 color = Color(0xFF1E293B)
                             )
                             Text(
-                                text = "On-Device Adaptive Student Engine",
+                                text = "Adaptive Student Engine • Isolated Profile",
                                 fontSize = 12.sp,
                                 color = Color(0xFF64748B)
                             )
                         }
 
-                        IconButton(
-                            onClick = onResetDemo,
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFFF1F5F9))
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Refresh,
-                                contentDescription = "Reset Demo",
-                                tint = Color(0xFF4F46E5),
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    Text(
-                        text = "DEMO PERSONA SWITCHER (1-TAP):",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF94A3B8),
-                        letterSpacing = 0.8.sp
-                    )
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        val isStudentA = activeProfile?.id == "student_a"
-                        val isStudentB = activeProfile?.id == "student_b"
-
-                        // Student A Button
-                        Surface(
-                            shape = RoundedCornerShape(10.dp),
-                            color = if (isStudentA) Color(0xFFEEF2FF) else Color(0xFFF8FAFC),
-                            border = ButtonDefaults.outlinedButtonBorder.copy(
-                                brush = androidx.compose.ui.graphics.SolidColor(
-                                    if (isStudentA) Color(0xFF4F46E5) else Color(0xFFE2E8F0)
-                                ),
-                                width = if (isStudentA) 1.5.dp else 1.dp
-                            ),
-                            modifier = Modifier
-                                .weight(1f)
-                                .clickable { onSwitchProfile("student_a") }
-                        ) {
-                            Column(modifier = Modifier.padding(10.dp)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(8.dp)
-                                            .clip(CircleShape)
-                                            .background(if (isStudentA) Color(0xFF4F46E5) else Color(0xFF94A3B8))
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = "Student A (Aarav)",
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = if (isStudentA) Color(0xFF4F46E5) else Color(0xFF334155)
-                                    )
-                                }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            TextButton(onClick = onOpenOnboarding) {
                                 Text(
-                                    text = "Math Pro • High Mastery",
-                                    fontSize = 11.sp,
-                                    color = Color(0xFF64748B)
+                                    text = "+ Switch / Add",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF4F46E5)
                                 )
                             }
-                        }
-
-                        // Student B Button
-                        Surface(
-                            shape = RoundedCornerShape(10.dp),
-                            color = if (isStudentB) Color(0xFFFEF2F2) else Color(0xFFF8FAFC),
-                            border = ButtonDefaults.outlinedButtonBorder.copy(
-                                brush = androidx.compose.ui.graphics.SolidColor(
-                                    if (isStudentB) Color(0xFFEF4444) else Color(0xFFE2E8F0)
-                                ),
-                                width = if (isStudentB) 1.5.dp else 1.dp
-                            ),
-                            modifier = Modifier
-                                .weight(1f)
-                                .clickable { onSwitchProfile("student_b") }
-                        ) {
-                            Column(modifier = Modifier.padding(10.dp)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(8.dp)
-                                            .clip(CircleShape)
-                                            .background(if (isStudentB) Color(0xFFEF4444) else Color(0xFF94A3B8))
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = "Student B (Priya)",
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = if (isStudentB) Color(0xFFEF4444) else Color(0xFF334155)
-                                    )
-                                }
-                                Text(
-                                    text = "Formula Struggle • Low Mastery",
-                                    fontSize = 11.sp,
-                                    color = Color(0xFF64748B)
+                            IconButton(
+                                onClick = onResetDemo,
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFFF1F5F9))
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Refresh,
+                                    contentDescription = "Reset Demo",
+                                    tint = Color(0xFF4F46E5),
+                                    modifier = Modifier.size(16.dp)
                                 )
                             }
                         }
                     }
-                }
-            }
-        }
 
-        // 2. Student Cognitive Profile Overview Card
-        item {
-            if (activeProfile != null) {
-                Card(
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color.White),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
+                    if (allProfiles.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Text(
+                            text = "AVAILABLE STUDENT PROFILES:",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF94A3B8),
+                            letterSpacing = 0.8.sp
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            items(allProfiles) { prof ->
+                                val isSelected = activeProfile?.id == prof.id
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = if (isSelected) Color(0xFFEEF2FF) else Color(0xFFF8FAFC),
+                                    border = ButtonDefaults.outlinedButtonBorder.copy(
+                                        brush = androidx.compose.ui.graphics.SolidColor(
+                                            if (isSelected) Color(0xFF4F46E5) else Color(0xFFE2E8F0)
+                                        ),
+                                        width = if (isSelected) 1.5.dp else 1.dp
+                                    ),
+                                    modifier = Modifier.clickable { onSwitchProfile(prof.id) }
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(8.dp)
+                                                .clip(CircleShape)
+                                                .background(if (isSelected) Color(0xFF4F46E5) else Color(0xFF94A3B8))
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = prof.name,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (isSelected) Color(0xFF4F46E5) else Color(0xFF334155)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if (activeProfile != null) {
+                        Spacer(modifier = Modifier.height(14.dp))
+                        HorizontalDivider(color = Color(0xFFF1F5F9))
+                        Spacer(modifier = Modifier.height(14.dp))
+
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Box(
                                 modifier = Modifier
-                                    .size(44.dp)
+                                    .size(46.dp)
                                     .clip(CircleShape)
                                     .background(Color(0xFF4F46E5)),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
-                                    text = activeProfile.name.take(1),
+                                    text = activeProfile.name.take(1).uppercase(),
                                     color = Color.White,
-                                    fontSize = 20.sp,
+                                    fontSize = 18.sp,
                                     fontWeight = FontWeight.Bold
                                 )
                             }
@@ -216,339 +184,439 @@ fun LearningTwinScreen(
                                     color = Color(0xFF1E293B)
                                 )
                                 Text(
-                                    text = "${activeProfile.grade} • ${activeProfile.learningStyle}",
+                                    text = "${activeProfile.institution} (${activeProfile.stream}) • ${activeProfile.targetExam}",
                                     fontSize = 12.sp,
                                     color = Color(0xFF64748B)
                                 )
+                                if (activeProfile.subjects.isNotEmpty()) {
+                                    Text(
+                                        text = "Subjects: ${activeProfile.subjects.joinToString(", ")}",
+                                        fontSize = 11.sp,
+                                        color = Color(0xFF4F46E5),
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
                             }
                         }
+                    }
+                }
+            }
+        }
 
-                        Spacer(modifier = Modifier.height(12.dp))
-                        HorizontalDivider(color = Color(0xFFF1F5F9))
-                        Spacer(modifier = Modifier.height(12.dp))
+        // 2. Tab Navigation: "Quizzes to Attend", "Attended Quizzes", "Concept Mastery"
+        item {
+            Card(
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    val tabs = listOf(
+                        "Quizzes to Attend" to pendingQuizzes.size,
+                        "Attended Quizzes" to quizAttempts.size,
+                        "Concept Mastery" to conceptMasteries.size
+                    )
 
-                        Row(modifier = Modifier.fillMaxWidth()) {
-                            Column(modifier = Modifier.weight(1f)) {
+                    tabs.forEachIndexed { index, (label, count) ->
+                        val isSelected = selectedTab == index
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isSelected) Color(0xFF4F46E5) else Color.Transparent)
+                                .clickable { selectedTab = index }
+                                .padding(vertical = 10.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 Text(
-                                    text = "STRENGTHS",
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF10B981)
+                                    text = label,
+                                    fontSize = 11.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (isSelected) Color.White else Color(0xFF64748B)
                                 )
-                                Text(
-                                    text = activeProfile.strengths,
-                                    fontSize = 12.sp,
-                                    color = Color(0xFF334155),
-                                    lineHeight = 16.sp
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "ACTIVE STRUGGLE",
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFFEF4444)
-                                )
-                                Text(
-                                    text = activeProfile.weaknesses,
-                                    fontSize = 12.sp,
-                                    color = Color(0xFF334155),
-                                    lineHeight = 16.sp
-                                )
+                                if (count > 0) {
+                                    Text(
+                                        text = "($count)",
+                                        fontSize = 10.sp,
+                                        color = if (isSelected) Color(0xFFE0E7FF) else Color(0xFF94A3B8)
+                                    )
+                                }
                             }
                         }
+                    }
+                }
+            }
+        }
 
-                        Spacer(modifier = Modifier.height(12.dp))
+        // TAB CONTENT
+        when (selectedTab) {
+            0 -> {
+                // TAB 0: QUIZZES TO ATTEND (Based on user's chat history)
+                if (pendingQuizzes.isEmpty()) {
+                    item {
+                        Card(
+                            shape = RoundedCornerShape(14.dp),
+                            colors = CardDefaults.cardColors(containerColor = Color.White),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(24.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Star,
+                                    contentDescription = null,
+                                    tint = Color(0xFF4F46E5),
+                                    modifier = Modifier.size(36.dp)
+                                )
+                                Spacer(modifier = Modifier.height(10.dp))
+                                Text(
+                                    text = "All Caught Up!",
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF0F172A)
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = "Quizzes are generated directly from topics you discuss in the Study chat. Ask a question or snap notes to unlock new diagnostic quizzes!",
+                                    fontSize = 12.sp,
+                                    color = Color(0xFF64748B),
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                    lineHeight = 16.sp
+                                )
+                                Spacer(modifier = Modifier.height(14.dp))
+                                Button(
+                                    onClick = onStartSocraticChat,
+                                    shape = RoundedCornerShape(10.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4F46E5))
+                                ) {
+                                    Text(
+                                        text = "Ask a Question in Study Chat",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    item {
+                        Text(
+                            text = "DIAGNOSTIC QUIZZES QUEUED FROM YOUR CHATS",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF64748B),
+                            letterSpacing = 0.8.sp
+                        )
+                    }
 
-                        // Privacy Badge
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = Color(0xFFF0FDF4),
-                            border = ButtonDefaults.outlinedButtonBorder.copy(
-                                brush = androidx.compose.ui.graphics.SolidColor(Color(0xFFBBF7D0)),
-                                width = 1.dp
-                            ),
+                    items(pendingQuizzes) { quiz ->
+                        Card(
+                            shape = RoundedCornerShape(14.dp),
+                            colors = CardDefaults.cardColors(containerColor = Color.White),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Row(
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(16.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.Lock,
-                                    contentDescription = "Privacy",
-                                    tint = Color(0xFF16A34A),
-                                    modifier = Modifier.size(14.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = "100% On-Device Enclave • Stored in SQLite • Zero Cloud Leakage",
-                                    fontSize = 11.sp,
-                                    color = Color(0xFF15803D),
-                                    fontWeight = FontWeight.Medium
-                                )
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Surface(
+                                            color = Color(0xFFEEF2FF),
+                                            shape = RoundedCornerShape(6.dp)
+                                        ) {
+                                            Text(
+                                                text = quiz.topic.uppercase(),
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color(0xFF4F46E5),
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = "Ready to test",
+                                            fontSize = 11.sp,
+                                            color = Color(0xFF10B981),
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(
+                                        text = quiz.concept,
+                                        fontSize = 16.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF0F172A)
+                                    )
+                                    Text(
+                                        text = "Generated from chat discussion",
+                                        fontSize = 11.sp,
+                                        color = Color(0xFF64748B)
+                                    )
+                                }
+
+                                Button(
+                                    onClick = { onStartQuiz(quiz) },
+                                    shape = RoundedCornerShape(10.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4F46E5))
+                                ) {
+                                    Text("Take Quiz", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
                             }
                         }
                     }
                 }
             }
-        }
 
-        // 3. Active Misconception Banner (if any)
-        val activeMisconception = conceptMasteries.firstOrNull { !it.activeMisconception.isNullOrBlank() }
-        if (activeMisconception != null) {
-            item {
-                Card(
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF1F2)),
-                    border = ButtonDefaults.outlinedButtonBorder.copy(
-                        brush = androidx.compose.ui.graphics.SolidColor(Color(0xFFFECDD3)),
-                        width = 1.5.dp
-                    ),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Default.Warning,
-                                contentDescription = "Misconception",
-                                tint = Color(0xFFE11D48),
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "MISCONCEPTION DETECTED",
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFFBE123C)
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = "Concept: ${activeMisconception.concept} (Mastery: ${activeMisconception.masteryScore}%)",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = Color(0xFF881337)
-                        )
-                        Text(
-                            text = activeMisconception.activeMisconception ?: "",
-                            fontSize = 12.sp,
-                            color = Color(0xFF9F1239),
-                            lineHeight = 16.sp
-                        )
-
-                        Spacer(modifier = Modifier.height(10.dp))
-                        Button(
-                            onClick = onStartSocraticChat,
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE11D48)),
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.fillMaxWidth().height(38.dp)
+            1 -> {
+                // TAB 1: ATTENDED QUIZZES (Historical quiz answers & results)
+                if (quizAttempts.isEmpty()) {
+                    item {
+                        Card(
+                            shape = RoundedCornerShape(14.dp),
+                            colors = CardDefaults.cardColors(containerColor = Color.White),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.PlayArrow,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Launch Remedial Socratic Session", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(24.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = "No Quizzes Attended Yet",
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF0F172A)
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = "Once you complete quizzes, your questions, answers, and score adjustments will be logged here.",
+                                    fontSize = 12.sp,
+                                    color = Color(0xFF64748B),
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                )
+                            }
                         }
                     }
-                }
-            }
-        }
-
-        // 4. Mastery Map Title
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Concept Mastery Map",
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF1E293B)
-                )
-                Text(
-                    text = "Class 10 • Physics",
-                    fontSize = 12.sp,
-                    color = Color(0xFF64748B)
-                )
-            }
-        }
-
-        // 5. Concept Mastery Cards List
-        items(conceptMasteries) { item ->
-            Card(
-                shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                elevation = CardDefaults.cardElevation(defaultElevation = 1.5.dp)
-            ) {
-                Column(modifier = Modifier.padding(14.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
+                } else {
+                    item {
                         Text(
-                            text = item.concept,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF1E293B)
-                        )
-
-                        val statusColor = when {
-                            item.masteryScore >= 75 -> Color(0xFF10B981)
-                            item.masteryScore >= 40 -> Color(0xFFF59E0B)
-                            else -> Color(0xFFEF4444)
-                        }
-                        val statusLabel = when {
-                            item.masteryScore >= 75 -> "MASTERED"
-                            item.masteryScore >= 40 -> "LEARNING"
-                            else -> "WEAK GAP"
-                        }
-
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = statusColor.copy(alpha = 0.12f)
-                        ) {
-                            Text(
-                                text = statusLabel,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = statusColor,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    // Progress Bar
-                    val progress = item.masteryScore / 100f
-                    val barColor = when {
-                        item.masteryScore >= 75 -> Color(0xFF10B981)
-                        item.masteryScore >= 40 -> Color(0xFFF59E0B)
-                        else -> Color(0xFFEF4444)
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        LinearProgressIndicator(
-                            progress = { progress },
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(8.dp)
-                                .clip(RoundedCornerShape(4.dp)),
-                            color = barColor,
-                            trackColor = Color(0xFFE2E8F0)
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Text(
-                            text = "${item.masteryScore}%",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = barColor
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            text = "Attempts: ${item.attempts} (${item.correctCount} correct, ${item.incorrectCount} wrong)",
+                            text = "QUIZ HISTORY & ACCURACY",
                             fontSize = 11.sp,
-                            color = Color(0xFF64748B)
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF64748B),
+                            letterSpacing = 0.8.sp
                         )
-                        if (item.lastErrorType != null) {
-                            Text(
-                                text = "Pattern: ${item.lastErrorType}",
-                                fontSize = 11.sp,
-                                color = Color(0xFFEF4444),
-                                fontWeight = FontWeight.Medium
-                            )
+                    }
+
+                    items(quizAttempts) { attempt ->
+                        Card(
+                            shape = RoundedCornerShape(14.dp),
+                            colors = CardDefaults.cardColors(containerColor = Color.White),
+                            border = androidx.compose.foundation.BorderStroke(
+                                1.dp,
+                                if (attempt.isCorrect) Color(0xFFD1FAE5) else Color(0xFFFEE2E2)
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(14.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "${attempt.concept} (${attempt.topic})",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF0F172A)
+                                    )
+                                    Surface(
+                                        color = if (attempt.isCorrect) Color(0xFFD1FAE5) else Color(0xFFFEE2E2),
+                                        shape = RoundedCornerShape(6.dp)
+                                    ) {
+                                        Text(
+                                            text = if (attempt.isCorrect) "PASSED (+12)" else "INCORRECT (-10)",
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (attempt.isCorrect) Color(0xFF065F46) else Color(0xFF991B1B),
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = attempt.question,
+                                    fontSize = 12.sp,
+                                    color = Color(0xFF334155),
+                                    lineHeight = 16.sp
+                                )
+
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = "Your Answer: ${attempt.selectedAnswer}",
+                                        fontSize = 11.sp,
+                                        color = if (attempt.isCorrect) Color(0xFF059669) else Color(0xFFDC2626),
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                    if (!attempt.isCorrect) {
+                                        Text(
+                                            text = "Correct: ${attempt.correctAnswer}",
+                                            fontSize = 11.sp,
+                                            color = Color(0xFF059669),
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }
             }
-        }
 
-        // 6. Next Best Learning Action Card
-        item {
-            Card(
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFFEEF2FF)),
-                border = ButtonDefaults.outlinedButtonBorder.copy(
-                    brush = androidx.compose.ui.graphics.SolidColor(Color(0xFFC7D2FE)),
-                    width = 1.dp
-                )
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.Star,
-                            contentDescription = "Action",
-                            tint = Color(0xFF4F46E5),
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
+            2 -> {
+                // TAB 2: CONCEPT MASTERY MAP & SOCRATIC TUTOR
+                if (conceptMasteries.isEmpty()) {
+                    item {
+                        Card(
+                            shape = RoundedCornerShape(14.dp),
+                            colors = CardDefaults.cardColors(containerColor = Color.White),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(24.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = "No Mastery Data Yet",
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF0F172A)
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = "As you ask questions in Study Chat and take quizzes, your personal AI twin extracts and models your mastery in real-time.",
+                                    fontSize = 12.sp,
+                                    color = Color(0xFF64748B),
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    item {
                         Text(
-                            text = "NEXT BEST LEARNING ACTION",
-                            fontSize = 12.sp,
+                            text = "EXTRACTED CONCEPT MASTERY",
+                            fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF4338CA),
-                            letterSpacing = 0.5.sp
+                            color = Color(0xFF64748B),
+                            letterSpacing = 0.8.sp
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = if (activeProfile?.id == "student_a") {
-                            "Advanced Multi-Step Circuit Application"
-                        } else {
-                            "Remediate Ohm's Law Formula Inversion (R = V / I)"
-                        },
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF1E1B4B)
-                    )
-                    Text(
-                        text = if (activeProfile?.id == "student_a") {
-                            "Student demonstrates 85% mastery. The on-device engine prescribes advanced circuit problems."
-                        } else {
-                            "Student inverts the division formula. The Socratic engine will prompt guiding questions before allowing numbers."
-                        },
-                        fontSize = 12.sp,
-                        color = Color(0xFF3730A3),
-                        lineHeight = 16.sp
-                    )
+                    items(conceptMasteries) { mastery ->
+                        Card(
+                            shape = RoundedCornerShape(14.dp),
+                            colors = CardDefaults.cardColors(containerColor = Color.White),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(14.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column {
+                                        Text(
+                                            text = mastery.concept,
+                                            fontSize = 15.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFF0F172A)
+                                        )
+                                        Text(
+                                            text = "${mastery.subject} • ${mastery.topic}",
+                                            fontSize = 11.sp,
+                                            color = Color(0xFF64748B)
+                                        )
+                                    }
 
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Button(
-                        onClick = onStartSocraticChat,
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4F46E5)),
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.fillMaxWidth().height(42.dp)
-                    ) {
-                        Text(
-                            text = "Start Socratic Tutoring Session",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Icon(
-                            imageVector = Icons.Default.ArrowForward,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
+                                    Text(
+                                        text = "${mastery.masteryScore}%",
+                                        fontSize = 18.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = when {
+                                            mastery.masteryScore >= 80 -> Color(0xFF10B981)
+                                            mastery.masteryScore >= 50 -> Color(0xFFF59E0B)
+                                            else -> Color(0xFFEF4444)
+                                        }
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.height(10.dp))
+                                LinearProgressIndicator(
+                                    progress = { (mastery.masteryScore / 100f).coerceIn(0f, 1f) },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(6.dp)
+                                        .clip(RoundedCornerShape(3.dp)),
+                                    color = when {
+                                        mastery.masteryScore >= 80 -> Color(0xFF10B981)
+                                        mastery.masteryScore >= 50 -> Color(0xFFF59E0B)
+                                        else -> Color(0xFFEF4444)
+                                    },
+                                    trackColor = Color(0xFFF1F5F9)
+                                )
+
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = "Attempts: ${mastery.attempts} (✓ ${mastery.correctCount} / ✗ ${mastery.incorrectCount})",
+                                        fontSize = 11.sp,
+                                        color = Color(0xFF64748B)
+                                    )
+                                    if (!mastery.activeMisconception.isNullOrBlank()) {
+                                        Text(
+                                            text = "Active Misconception",
+                                            fontSize = 11.sp,
+                                            color = Color(0xFFEF4444),
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
