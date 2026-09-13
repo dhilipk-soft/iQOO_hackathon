@@ -131,7 +131,7 @@ class ExplainPipeline(
     }
 
     override suspend fun generateQuiz(capture: StudyCapture): List<QuizQuestion> {
-        val quizGen = QuizGenerator(llmEngine)
+        val quizGen = QuizGenerator(llmEngine, retrievalClient)
         return quizGen.generateQuiz(capture)
     }
 }

@@ -81,6 +81,7 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
     private val database = AppDatabase.getDatabase(application)
     val learningTwinManager = com.studylens.ai.LearningTwinManager(database)
     private val explainPipeline = ExplainPipeline(llmEngine, retrievalClient, learningTwinManager)
+    private val quizGenerator = com.studylens.ai.QuizGenerator(llmEngine, retrievalClient)
 
     private val chatDao = database.chatDao()
     val usageCollector = try {
@@ -177,6 +178,9 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
     private val _quizSubmitted = MutableStateFlow(false)
     val quizSubmitted: StateFlow<Boolean> = _quizSubmitted.asStateFlow()
 
+    private val _isGeneratingQuiz = MutableStateFlow(false)
+    val isGeneratingQuiz: StateFlow<Boolean> = _isGeneratingQuiz.asStateFlow()
+
     private val _revisionList = MutableStateFlow<List<QuizQuestion>>(emptyList())
     val revisionList: StateFlow<List<QuizQuestion>> = _revisionList.asStateFlow()
 
@@ -256,7 +260,7 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
 
     fun startQuizForPendingConcept(pending: com.studylens.input.data.PendingQuizEntity) {
         _capturedText.value = "${pending.concept}: ${pending.topic}"
-        generatePracticeQuiz()
+        generatePracticeQuiz(topicOverride = "${pending.concept} (${pending.topic})")
     }
 
     fun resetLearningTwinDemoData() {
@@ -576,18 +580,46 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun generatePracticeQuiz() {
+    fun generatePracticeQuiz(topicOverride: String? = null) {
         _selectedQuizAnswers.value = emptyMap()
         _quizSubmitted.value = false
+        _isGeneratingQuiz.value = true
 
         viewModelScope.launch {
-            val startTime = System.currentTimeMillis()
-            val capture = StudyCapture(
-                id = startTime,
-                extractedText = _capturedText.value,
-                timestamp = startTime
-            )
-            _quizQuestions.value = explainPipeline.generateQuiz(capture)
+            try {
+                val profile = activeStudentProfile.value
+                val sessionTitle = _activeSession.value?.title
+                val subject = _activeSession.value?.subject ?: profile?.subjects?.firstOrNull() ?: "Core Subject"
+                val chatMessages = _followUpList.value
+                val chatContext = buildString {
+                    if (!topicOverride.isNullOrBlank()) {
+                        append("Target Topic: ").append(topicOverride).append("\n")
+                    } else if (!sessionTitle.isNullOrBlank()) {
+                        append("Active Discussion Topic: ").append(sessionTitle).append("\n")
+                    }
+                    if (_capturedText.value.isNotBlank()) {
+                        append("Session Notes: ").append(_capturedText.value.take(400)).append("\n")
+                    }
+                    if (chatMessages.isNotEmpty()) {
+                        append("Recent Socratic Discussion:\n")
+                        chatMessages.takeLast(4).forEach { msg ->
+                            append("Student: ").append(msg.question.take(150)).append("\n")
+                            append("Tutor: ").append(msg.answer.take(200)).append("\n")
+                        }
+                    }
+                }
+                val topic = topicOverride ?: sessionTitle ?: subject
+                val questions = quizGenerator.generateQuiz(
+                    contextText = if (chatContext.isNotBlank()) chatContext else "Subject: $subject",
+                    topic = topic,
+                    isOnline = _isOnline.value
+                )
+                _quizQuestions.value = questions
+            } catch (e: Exception) {
+                android.util.Log.e("StudyViewModel", "Quiz generation failed", e)
+            } finally {
+                _isGeneratingQuiz.value = false
+            }
         }
     }
 

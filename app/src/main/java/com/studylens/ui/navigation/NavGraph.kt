@@ -75,6 +75,7 @@ fun NavGraph(
     val quizQuestions by actualViewModel.quizQuestions.collectAsState()
     val selectedQuizAnswers by actualViewModel.selectedQuizAnswers.collectAsState()
     val isQuizSubmitted by actualViewModel.quizSubmitted.collectAsState()
+    val isGeneratingQuiz by actualViewModel.isGeneratingQuiz.collectAsState()
     val revisionList by actualViewModel.revisionList.collectAsState()
     val focusInsight by actualViewModel.focusInsight.collectAsState()
     val studySession by actualViewModel.studySession.collectAsState()
@@ -419,6 +420,7 @@ fun NavGraph(
                     questions = quizQuestions,
                     selectedAnswers = selectedQuizAnswers,
                     isSubmitted = isQuizSubmitted,
+                    isGeneratingQuiz = isGeneratingQuiz,
                     onSelectOption = { qId, opt -> actualViewModel.selectQuizAnswer(qId, opt) },
                     onSubmitQuiz = {
                         actualViewModel.submitQuiz()

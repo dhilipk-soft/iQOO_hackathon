@@ -53,135 +53,51 @@ fun LearningTwinScreen(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // 1. Header & Active Student Card
+        // 1. Sleek Header with Professional Branding & Profile Top Bar Pill
         item {
-            Card(
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                Row(
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(CircleShape)
+                            .background(
+                                Brush.linearGradient(
+                                    listOf(Color(0xFF4F46E5), Color(0xFF7C3AED))
+                                )
+                            ),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "Personal Learning Twin",
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF1E293B)
-                            )
-                            Text(
-                                text = "Adaptive Student Engine • Isolated Profile",
-                                fontSize = 11.sp,
-                                color = Color(0xFF64748B)
-                            )
-                        }
-
-                        ProfileTopBarPill(
-                            activeProfile = activeProfile,
-                            onClick = onOpenProfileDialog
-                        )
+                        com.studylens.ui.navigation.TwinBrainIcon(tint = Color.White)
                     }
-
-                    if (allProfiles.isNotEmpty()) {
-                        Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column {
                         Text(
-                            text = "AVAILABLE STUDENT PROFILES:",
-                            fontSize = 10.sp,
+                            text = "Learning Twin",
+                            fontSize = 17.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF94A3B8),
-                            letterSpacing = 0.8.sp
+                            color = Color(0xFF0F172A)
                         )
-                        Spacer(modifier = Modifier.height(6.dp))
-
-                        LazyRow(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            items(allProfiles) { prof ->
-                                val isSelected = activeProfile?.id == prof.id
-                                Surface(
-                                    shape = RoundedCornerShape(10.dp),
-                                    color = if (isSelected) Color(0xFFEEF2FF) else Color(0xFFF8FAFC),
-                                    border = ButtonDefaults.outlinedButtonBorder.copy(
-                                        brush = androidx.compose.ui.graphics.SolidColor(
-                                            if (isSelected) Color(0xFF4F46E5) else Color(0xFFE2E8F0)
-                                        ),
-                                        width = if (isSelected) 1.5.dp else 1.dp
-                                    ),
-                                    modifier = Modifier.clickable { onSwitchProfile(prof.id) }
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(8.dp)
-                                                .clip(CircleShape)
-                                                .background(if (isSelected) Color(0xFF4F46E5) else Color(0xFF94A3B8))
-                                        )
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text(
-                                            text = prof.name,
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = if (isSelected) Color(0xFF4F46E5) else Color(0xFF334155)
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    if (activeProfile != null) {
-                        Spacer(modifier = Modifier.height(14.dp))
-                        HorizontalDivider(color = Color(0xFFF1F5F9))
-                        Spacer(modifier = Modifier.height(14.dp))
-
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .size(46.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(0xFF4F46E5)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = activeProfile.name.take(1).uppercase(),
-                                    color = Color.White,
-                                    fontSize = 18.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column {
-                                Text(
-                                    text = activeProfile.name,
-                                    fontSize = 16.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF1E293B)
-                                )
-                                Text(
-                                    text = "${activeProfile.institution} (${activeProfile.stream}) • ${activeProfile.targetExam}",
-                                    fontSize = 12.sp,
-                                    color = Color(0xFF64748B)
-                                )
-                                if (activeProfile.subjects.isNotEmpty()) {
-                                    Text(
-                                        text = "Subjects: ${activeProfile.subjects.joinToString(", ")}",
-                                        fontSize = 11.sp,
-                                        color = Color(0xFF4F46E5),
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                }
-                            }
-                        }
+                        Text(
+                            text = "Adaptive Diagnostic Engine",
+                            fontSize = 11.sp,
+                            color = Color(0xFF64748B)
+                        )
                     }
                 }
+
+                ProfileTopBarPill(
+                    activeProfile = activeProfile,
+                    onClick = onOpenProfileDialog
+                )
             }
         }
 
