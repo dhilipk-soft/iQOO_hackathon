@@ -36,6 +36,9 @@ class ExplainPipeline(
 
     private fun isImplicitFollowUp(question: String): Boolean {
         val clean = question.lowercase().trim()
+        if (clean.contains("this chat") || clean.contains("this conversation") || clean.contains("we discuss") || clean.contains("we talk") || clean.contains("whole context") || clean.contains("all context")) {
+            return false
+        }
         // If it's arithmetic or math, it's an explicit calculation, NOT an implicit follow-up
         if (clean.contains(Regex("""\d+\s*[+\-*x×÷/]\s*\d+"""))) return false
         // Check for pronouns that imply dependence on the previous topic
@@ -125,7 +128,7 @@ class ExplainPipeline(
                 3. Third Law (Action-Reaction): For every action, there is an equal and opposite reaction (F_AB = -F_BA).
             """.trimIndent()
 
-            lower.contains("even number") || (lower.contains("even") && !lower.contains("evening")) -> """
+            Regex("""\b(even\s+numbers?|parity|even\s+and\s+odd|odd\s+and\s+even|what\s+is\s+an?\s+even\s+number|is\s+-?\d+\s+even)\b""").containsMatchIn(lower) -> """
                 An even number is an integer that is exactly divisible by 2 with no remainder, written as n = 2k (for k ∈ ℤ).
 
                 • Parity Criterion: n mod 2 == 0. Any number ending in 0, 2, 4, 6, 8 is even.
@@ -235,7 +238,8 @@ class ExplainPipeline(
         conversationContext: String,
         question: String,
         isOnline: Boolean,
-        preferredIntent: StudyIntent
+        preferredIntent: StudyIntent,
+        image: Bitmap?
     ): ExplanationResult {
         // 1. Math Evaluation Check
         val mathResult = evaluateMathExpression(question)
@@ -276,7 +280,7 @@ class ExplainPipeline(
 
         val resolvedIntent = StudyIntentClassifier.classify(question, preferredIntent)
         val profile = llmEngine.getActiveProfile()
-        val trimmedContext = if (isImplicitFollowUp(question)) conversationContext.takeLast(400) else conversationContext.takeLast(1000)
+        val trimmedContext = if (isImplicitFollowUp(question)) conversationContext.takeLast(1500) else conversationContext.takeLast(3000)
 
         val prompt = buildString {
             append(buildSystemHeader(profile))
@@ -300,7 +304,7 @@ class ExplainPipeline(
             append("Direct Answer:")
         }
 
-        var rawAnswer = llmEngine.generateResponse(prompt)
+        var rawAnswer = llmEngine.generateResponse(prompt, image)
 
         val isFailedAnswer = rawAnswer.isBlank() ||
                 rawAnswer.startsWith("Sorry,", ignoreCase = true) ||
@@ -351,38 +355,21 @@ class ExplainPipeline(
         val maxChars = availablePromptTokens * 4
 
         val fullTranscript = buildString {
-            append("Main Topic Explanation:\n$rootExplanation\n\n")
+            append("Main Initial Topic:\n${rootExplanation.take(500)}\n\n")
             if (followUps.isNotEmpty()) {
-                append("Follow-Up Discussion Points:\n")
+                append("Topics and Questions Discussed in Session:\n")
                 followUps.forEachIndexed { idx, fu ->
-                    append("[${idx + 1}] Q: ${fu.question}\n    A: ${fu.answer}\n\n")
+                    val cleanSnippet = fu.answer.trim().lines().firstOrNull { it.isNotBlank() }?.take(160) ?: fu.answer.take(160)
+                    append("[${idx + 1}] Question: ${fu.question}\n    Summary: $cleanSnippet\n\n")
                 }
             }
         }
 
-        return if (fullTranscript.length <= maxChars) {
-            SummaryContextResult(
-                transcript = fullTranscript,
-                mode = "Full Chat (${followUps.size + 1} sections)",
-                totalMessagesEvaluated = followUps.size + 1
-            )
-        } else {
-            val recent = followUps.takeLast(3)
-            val recentTranscript = buildString {
-                append("Main Topic Overview:\n${rootExplanation.take(400)}...\n\n")
-                if (recent.isNotEmpty()) {
-                    append("Recent Q&A Discussion (Last ${recent.size} exchanges):\n")
-                    recent.forEachIndexed { idx, fu ->
-                        append("Q: ${fu.question}\nA: ${fu.answer}\n\n")
-                    }
-                }
-            }
-            SummaryContextResult(
-                transcript = recentTranscript,
-                mode = "Recent Discussion (Last ${recent.size} Q&As + Topic Overview)",
-                totalMessagesEvaluated = recent.size + 1
-            )
-        }
+        return SummaryContextResult(
+            transcript = if (fullTranscript.length > maxChars) fullTranscript.take(maxChars) else fullTranscript,
+            mode = "Full Session Summary (${followUps.size + 1} topics evaluated)",
+            totalMessagesEvaluated = followUps.size + 1
+        )
     }
 
     suspend fun summarizeConversation(
@@ -395,21 +382,22 @@ class ExplainPipeline(
         llmEngine.resetSession()
 
         val prompt = buildString {
-            append("You are an expert study tutor. Summarize the following study session clearly and concisely.\n\n")
+            append("You are an expert study tutor. Summarize the following study session clearly and concisely covering all distinct topics.\n\n")
             append("CONVERSATION TRANSCRIPT (${contextResult.mode}):\n")
             append("${contextResult.transcript}\n\n")
             append("INSTRUCTIONS:\n")
-            append("1. Provide a structured summary with 3 sections:\n")
-            append("   📌 Core Concept & Main Subject\n")
+            append("1. Provide a structured summary covering ALL topics discussed above in 3 sections:\n")
+            append("   📌 Core Concepts & Main Subjects Covered\n")
             append("   💡 Key Q&As & Questions Answered\n")
             append("   🔑 Final Takeaways to Remember\n")
-            append("2. Keep the summary concise, accurate, and strictly relevant to the text above.\n")
+            append("2. Keep the summary concise, accurate, and strictly relevant to all topics discussed.\n")
             append("3. Do not invent unrelated topics.")
         }
 
         var summaryText = llmEngine.generateResponse(prompt)
         if (summaryText.isBlank() || summaryText.length < 20) {
-            summaryText = "📌 Core Concept: ${rootExplanation.take(100)}\n\n💡 Key Discussion: ${followUps.size} Q&As covered.\n\n🔑 Takeaway: Focus on core principles and practice problems."
+            val allTopics = (listOf(rootExplanation.take(60)) + followUps.map { it.question }).distinct()
+            summaryText = "📌 Core Concepts & Scope: Multi-topic study session covering: ${allTopics.joinToString(" • ")}.\n\n💡 Key Q&As: Addressed ${followUps.size} key questions comprehensively.\n\n🔑 Final Takeaways: Review and compare foundational characteristics and practical implementations across each topic."
         }
 
         val structured = StructuredStudyResponseParser.parse(

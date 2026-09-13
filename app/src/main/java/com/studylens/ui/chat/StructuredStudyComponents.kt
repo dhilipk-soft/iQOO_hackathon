@@ -12,6 +12,8 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import android.graphics.Bitmap
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -21,7 +23,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.ThumbUp
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -447,9 +452,11 @@ fun StructuredExplanationCard(
     isSpeaking: Boolean,
     onSpeak: () -> Unit,
     onStopSpeak: () -> Unit,
-    onTakeQuiz: () -> Unit,
+    onTakeQuiz: () -> Unit = {},
     isLiked: Boolean,
     onToggleLike: () -> Unit,
+    attachedImage: Bitmap? = null,
+    onImageClick: (Bitmap) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -463,8 +470,6 @@ fun StructuredExplanationCard(
     }
 
     val title = effectiveResponse.title.ifBlank { fallbackTitle }
-    val subject = effectiveResponse.subject
-    val intent = effectiveResponse.intent
     val coreText = effectiveResponse.coreConcept.ifBlank { fallbackExplanation }
     val activeCitations = if (usedOnlineContext) {
         effectiveResponse.citations.ifEmpty { citations }
@@ -485,61 +490,64 @@ fun StructuredExplanationCard(
         )
     ) {
         Column(modifier = Modifier.padding(18.dp)) {
-            // Header: Subject, Intent & Engine Verification Pills
+            // Header: Engine Verification Pill (Clean, without Subject/Code clutter tags)
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    // Subject Pill
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = Color(0xFFF1F5F9)
-                    ) {
-                        Text(
-                            text = subject,
-                            color = Color(0xFF475569),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                        )
-                    }
-
-                    // Intent Pill
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = Color(0xFFEEF2FF),
-                        border = ButtonDefaults.outlinedButtonBorder.copy(
-                            brush = Brush.horizontalGradient(listOf(Color(0xFFC7D2FE), Color(0xFFA5B4FC))),
-                            width = 1.dp
-                        )
-                    ) {
-                        Text(
-                            text = "${intent.icon} ${intent.displayName}",
-                            color = Color(0xFF4F46E5),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                        )
-                    }
-                }
-
                 // Online/Offline Verification Status
                 Surface(
                     shape = RoundedCornerShape(12.dp),
                     color = if (usedOnlineContext) Color(0xFFEEF2FF) else Color(0xFFECFDF5)
                 ) {
                     Text(
-                        text = if (usedOnlineContext) "📡 Verified Web" else "📴 100% On-Device",
+                        text = if (usedOnlineContext) "📡 Verified Web" else "📴 100% On-Device AI",
                         color = if (usedOnlineContext) Color(0xFF4F46E5) else Color(0xFF059669),
-                        fontSize = 10.sp,
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
                     )
+                }
+            }
+
+            // Attached Photo if present
+            attachedImage?.let { bmp ->
+                Spacer(modifier = Modifier.height(10.dp))
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { onImageClick(bmp) }
+                ) {
+                    Image(
+                        bitmap = bmp.asImageBitmap(),
+                        contentDescription = "Attached photo",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 200.dp)
+                    )
+                    Surface(
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(8.dp),
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color.Black.copy(alpha = 0.65f)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Search,
+                                contentDescription = "View Photo",
+                                tint = Color.White,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Tap to view", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
                 }
             }
 
@@ -579,16 +587,16 @@ fun StructuredExplanationCard(
                 lineHeight = 22.sp
             )
 
-            // ChatGPT Section 2: Formula / Code Box if available
+            // ChatGPT Section 2: Code / Mathematical Formula Block
             effectiveResponse.formulaOrCode?.let { formulaBlock ->
                 Spacer(modifier = Modifier.height(14.dp))
                 FormulaCodeBlockView(block = formulaBlock)
             }
 
-            // ChatGPT Section 3: Step-by-Step Breakdown if available
-            effectiveResponse.steps.takeIf { it.isNotEmpty() }?.let { stepsList ->
+            // ChatGPT Section 3: Step-by-Step Educational Breakdown
+            if (effectiveResponse.steps.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(14.dp))
-                StepTimelineView(steps = stepsList)
+                StepTimelineView(steps = effectiveResponse.steps)
             }
 
             // ChatGPT Section 4: Real-World Analogy Callout
@@ -683,37 +691,26 @@ fun StructuredExplanationCard(
             }
 
             Spacer(modifier = Modifier.height(16.dp))
-
-            // Action Buttons Row: TTS Audio Button
-            Button(
-                onClick = { if (isSpeaking) onStopSpeak() else onSpeak() },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(44.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFF4F46E5),
-                    contentColor = Color.White
-                ),
-                shape = RoundedCornerShape(14.dp)
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = if (isSpeaking) "⏹️ Stop Audio" else "🔊 Listen to Explanation",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
-
+            HorizontalDivider(color = Color(0xFFF1F5F9))
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Bottom Actions: Copy, Thumbs up, Practice Quiz
+            // Bottom Actions: Copy, TTS, Thumbs up (Quiz removed)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(
+                        onClick = if (isSpeaking) onStopSpeak else onSpeak,
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Text(text = if (isSpeaking) "⏹" else "🔊", fontSize = 16.sp)
+                    }
+
                     IconButton(
                         onClick = onToggleLike,
                         modifier = Modifier.size(36.dp)
@@ -722,7 +719,7 @@ fun StructuredExplanationCard(
                             imageVector = Icons.Default.ThumbUp,
                             contentDescription = "Helpful",
                             tint = if (isLiked) Color(0xFF4F46E5) else Color(0xFF94A3B8),
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(16.dp)
                         )
                     }
 
@@ -737,23 +734,6 @@ fun StructuredExplanationCard(
                         Text(text = "📋", fontSize = 15.sp)
                     }
                 }
-
-                TextButton(
-                    onClick = onTakeQuiz,
-                    colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFF4F46E5))
-                ) {
-                    Text(
-                        text = "Take Practice Quiz",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 13.sp
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp)
-                    )
-                }
             }
         }
     }
@@ -767,6 +747,7 @@ fun StructuredFollowUpCard(
     message: FollowUpMessage,
     isLiked: Boolean,
     onToggleLike: () -> Unit,
+    onImageClick: (Bitmap) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val structured = message.structuredResponse
@@ -787,13 +768,51 @@ fun StructuredFollowUpCard(
                     brush = Brush.horizontalGradient(listOf(Color(0xFFC7D2FE), Color(0xFFA5B4FC)))
                 )
             ) {
-                Text(
-                    text = message.question,
-                    color = Color(0xFF1E1B4B),
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
-                )
+                Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+                    message.image?.let { bmp ->
+                        Box(
+                            modifier = Modifier
+                                .padding(bottom = 8.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable { onImageClick(bmp) }
+                        ) {
+                            Image(
+                                bitmap = bmp.asImageBitmap(),
+                                contentDescription = "Uploaded image",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .size(width = 180.dp, height = 130.dp)
+                            )
+                            Surface(
+                                modifier = Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .padding(6.dp),
+                                shape = RoundedCornerShape(6.dp),
+                                color = Color.Black.copy(alpha = 0.65f)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Search,
+                                        contentDescription = "View Photo",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(12.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(3.dp))
+                                    Text("View", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+                    Text(
+                        text = message.question,
+                        color = Color(0xFF1E1B4B),
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
             }
         }
 
@@ -809,10 +828,10 @@ fun StructuredFollowUpCard(
             shadowElevation = 1.dp
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
-                // Header badge
+                // Header badge (Clean: only online/offline verification badge, no code/science tags)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                    horizontalArrangement = Arrangement.End,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Surface(
@@ -826,21 +845,6 @@ fun StructuredFollowUpCard(
                             fontWeight = FontWeight.Bold,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                         )
-                    }
-
-                    if (structured != null) {
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = Color(0xFFF1F5F9)
-                        ) {
-                            Text(
-                                text = "${structured.intent.icon} ${structured.intent.displayName}",
-                                color = Color(0xFF475569),
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                            )
-                        }
                     }
                 }
 

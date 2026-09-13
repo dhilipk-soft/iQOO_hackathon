@@ -144,7 +144,7 @@ object StructuredStudyResponseParser {
                     )
                 )
             }
-            lowerCombined.contains("even number") || lowerCombined.contains("even and odd") || lowerCombined.contains("what is even") || (lowerCombined.contains("even") && !lowerCombined.contains("evening")) -> {
+            Regex("""\b(even\s+numbers?|parity|even\s+and\s+odd|odd\s+and\s+even|what\s+is\s+an?\s+even\s+number|is\s+-?\d+\s+even)\b""").containsMatchIn(lowerCombined) -> {
                 Pair(
                     "An even number is an integer that is exactly divisible by 2 with no remainder, formally expressed as n = 2k for some integer k. Integers that leave a remainder of 1 upon division by 2 are odd numbers (n = 2k + 1). Crucially, 0 is an even number because 0 = 2 × 0, and negative numbers can also be even integers (e.g., -2, -4, -6).",
                     listOf(
@@ -174,7 +174,7 @@ object StructuredStudyResponseParser {
         }
 
         val finalFormulaOrCode = formulaOrCodeBlock ?: when {
-            lowerCombined.contains("even number") || lowerCombined.contains("what is even") || (lowerCombined.contains("even") && !lowerCombined.contains("evening")) -> FormulaCodeBlock(
+            Regex("""\b(even\s+numbers?|parity|even\s+and\s+odd|odd\s+and\s+even|what\s+is\s+an?\s+even\s+number|is\s+-?\d+\s+even)\b""").containsMatchIn(lowerCombined) -> FormulaCodeBlock(
                 content = "n = 2k  (where k ∈ ℤ)\nn % 2 == 0  => True for even numbers\nParity: Even + Even = Even | Even + Odd = Odd\nExamples: ..., -4, -2, 0, 2, 4, 6, 8, ...",
                 languageOrType = "math",
                 isCode = false

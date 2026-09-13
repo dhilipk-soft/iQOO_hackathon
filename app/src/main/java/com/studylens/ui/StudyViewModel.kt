@@ -57,7 +57,8 @@ data class FollowUpMessage(
     val usedOnlineContext: Boolean = false,
     val timestamp: Long = System.currentTimeMillis(),
     val structuredResponse: StructuredStudyResponse? = null,
-    val citations: List<VerifiedCitation> = emptyList()
+    val citations: List<VerifiedCitation> = emptyList(),
+    val image: Bitmap? = null
 )
 
 data class StudyTopicSession(
@@ -71,7 +72,8 @@ data class StudyTopicSession(
     val usedOnlineContext: Boolean = false,
     val followUps: List<FollowUpMessage> = emptyList(),
     val structuredResponse: StructuredStudyResponse? = null,
-    val citations: List<VerifiedCitation> = emptyList()
+    val citations: List<VerifiedCitation> = emptyList(),
+    val image: Bitmap? = null
 )
 
 private const val SESSION_ID_PREFIX = "session_"
@@ -180,9 +182,11 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
     private val _sessionHistory = MutableStateFlow<List<StudyTopicSession>>(emptyList())
     val sessionHistory: StateFlow<List<StudyTopicSession>> = _sessionHistory.asStateFlow()
 
-    // No chat is open by default - the user lands on the empty canvas, not a pre-filled example.
     private val _activeSession = MutableStateFlow<StudyTopicSession?>(null)
     val activeSession: StateFlow<StudyTopicSession?> = _activeSession.asStateFlow()
+
+    private val _activeSessionImage = MutableStateFlow<Bitmap?>(null)
+    val activeSessionImage: StateFlow<Bitmap?> = _activeSessionImage.asStateFlow()
 
     private val _quizQuestions = MutableStateFlow<List<QuizQuestion>>(emptyList())
     val quizQuestions: StateFlow<List<QuizQuestion>> = _quizQuestions.asStateFlow()
@@ -368,6 +372,7 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
     fun startNewSession() {
         llmEngine.resetSession()
         _activeSession.value = null
+        _activeSessionImage.value = null
         _capturedText.value = ""
         _explanationResult.value = null
         _followUpList.value = emptyList()
@@ -387,6 +392,7 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
         _capturedText.value = textToProcess
         _isExplaining.value = true
         _followUpList.value = emptyList()
+        _activeSessionImage.value = image
         // Fresh capture gets a clean KV-cache
         llmEngine.resetSession()
 
@@ -449,7 +455,8 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
                 usedOnlineContext = result.usedOnlineContext,
                 followUps = emptyList(),
                 structuredResponse = result.structuredResponse,
-                citations = result.citations
+                citations = result.citations,
+                image = image
             )
             _explanationResult.value = result
             _isExplaining.value = false
@@ -457,17 +464,25 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun isSummarizeQuery(question: String): Boolean {
-        val lower = question.lowercase()
-        return lower.contains("summarize") || lower.contains("summarise") ||
-                lower.contains("summary") || lower.contains("recap") ||
-                lower.contains("key takeaways")
+        val lower = question.lowercase().trim()
+        val keywords = listOf(
+            "summarize", "summarise", "summary", "recap", "key takeaways",
+            "takeaways", "whole context", "all context", "full context",
+            "context of this chat", "context of the chat", "context of our chat",
+            "what did we talk about", "what did we discuss", "what have we discussed",
+            "what have we talked about", "what were the topics", "overview of this chat",
+            "overview of the chat", "review of this chat", "everything we discussed",
+            "everything we covered", "technologies covered", "technologies discussed",
+            "topics covered"
+        )
+        return keywords.any { lower.contains(it) }
     }
 
     fun summarizeCurrentConversation() {
         val rootExplanation = _explanationResult.value?.finalExplanation
             ?: _activeSession.value?.explanation
             ?: _capturedText.value
-        if (rootExplanation.isBlank()) return
+        if (rootExplanation.isBlank() && _followUpList.value.isEmpty()) return
 
         _isAnsweringFollowUp.value = true
 
@@ -507,10 +522,12 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun askFollowUp(question: String) {
-        if (question.isBlank()) return
+    fun askFollowUp(question: String, image: Bitmap? = null) {
+        val cleanQuestion = question.trim().ifBlank {
+            if (image != null) "Explain this uploaded image in detail." else return
+        }
 
-        if (isSummarizeQuery(question)) {
+        if (isSummarizeQuery(cleanQuestion)) {
             summarizeCurrentConversation()
             return
         }
@@ -536,7 +553,14 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
 
-            val result = explainPipeline.answerFollowUp(capture, conversationContext, question, online, intentToUse)
+            val result = explainPipeline.answerFollowUp(
+                capture = capture,
+                conversationContext = conversationContext,
+                question = cleanQuestion,
+                isOnline = online,
+                preferredIntent = intentToUse,
+                image = image
+            )
 
             val latency = System.currentTimeMillis() - startTime
             _vitals.value = _vitals.value.copy(latencyMs = latency)
@@ -546,7 +570,7 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
                 chatDao.insertMessage(
                     ChatMessageEntity(
                         sessionId = sessionDbId,
-                        question = question,
+                        question = cleanQuestion,
                         answer = result.structuredResponse?.rawText ?: result.finalExplanation,
                         timestamp = startTime
                     )
@@ -555,11 +579,12 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
 
             val newMessage = FollowUpMessage(
                 id = System.currentTimeMillis().toString(),
-                question = question,
+                question = cleanQuestion,
                 answer = result.finalExplanation,
                 usedOnlineContext = result.usedOnlineContext,
                 structuredResponse = result.structuredResponse,
-                citations = result.citations
+                citations = result.citations,
+                image = image
             )
             _followUpList.value = _followUpList.value + newMessage
             _isAnsweringFollowUp.value = false

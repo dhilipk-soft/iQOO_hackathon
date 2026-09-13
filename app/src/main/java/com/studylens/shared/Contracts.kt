@@ -25,7 +25,8 @@ interface StudyBrain {
         conversationContext: String,
         question: String,
         isOnline: Boolean,
-        preferredIntent: StudyIntent = StudyIntent.AUTO
+        preferredIntent: StudyIntent = StudyIntent.AUTO,
+        image: Bitmap? = null
     ): ExplanationResult
 
     suspend fun generateQuiz(capture: StudyCapture): List<QuizQuestion>

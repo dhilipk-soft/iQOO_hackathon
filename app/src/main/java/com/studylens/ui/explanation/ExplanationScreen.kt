@@ -346,19 +346,5 @@ fun ExplanationScreen(
         }
 
         Spacer(modifier = Modifier.height(8.dp))
-
-        // 6. Navigation CTA: Practice Quiz
-        Button(
-            onClick = onGenerateQuiz,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(48.dp),
-            shape = RoundedCornerShape(12.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981))
-        ) {
-            Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(modifier = Modifier.width(8.dp))
-            Text("Take Practice Quiz (3 Questions) →", fontSize = 14.sp, fontWeight = FontWeight.Bold)
-        }
     }
 }

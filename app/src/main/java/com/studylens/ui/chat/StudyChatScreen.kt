@@ -61,6 +61,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import com.studylens.shared.ExplanationResult
@@ -113,6 +115,7 @@ fun StudyChatScreen(
     var inputText by remember { mutableStateOf("") }
     var showMediaSheet by remember { mutableStateOf(false) }
     var likedCards by remember { mutableStateOf(setOf<String>()) }
+    var viewingImage by remember { mutableStateOf<Bitmap?>(null) }
     val listState = rememberLazyListState()
 
     // Media attachment state - no OCR anymore, the model reads the photo directly.
@@ -705,7 +708,9 @@ fun StudyChatScreen(
                                     } else {
                                         likedCards + "main_explanation"
                                     }
-                                }
+                                },
+                                attachedImage = activeSession?.image,
+                                onImageClick = { viewingImage = it }
                             )
                         }
 
@@ -720,7 +725,8 @@ fun StudyChatScreen(
                                     } else {
                                         likedCards + followUp.id
                                     }
-                                }
+                                },
+                                onImageClick = { viewingImage = it }
                             )
                         }
 
@@ -901,6 +907,50 @@ fun StudyChatScreen(
             }
         }
     }
+
+    // ChatGPT-Style Full-Screen Clickable Image Viewer Modal
+    viewingImage?.let { bmp ->
+        Dialog(
+            onDismissRequest = { viewingImage = null },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.94f))
+                    .clickable { viewingImage = null },
+                contentAlignment = Alignment.Center
+            ) {
+                Image(
+                    bitmap = bmp.asImageBitmap(),
+                    contentDescription = "Full uploaded image",
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp)
+                        .clickable(enabled = false) {}
+                )
+
+                // Floating Top-Right Close Button
+                IconButton(
+                    onClick = { viewingImage = null },
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .statusBarsPadding()
+                        .padding(16.dp)
+                        .size(44.dp)
+                        .background(Color.White.copy(alpha = 0.25f), CircleShape)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Close",
+                        tint = Color.White,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+            }
+        }
+    }
 }
 
 private fun rotateBitmapIfRequired(filePath: String, bitmap: Bitmap): Bitmap {
@@ -1007,9 +1057,9 @@ fun EmptyStudyCanvas(
                 onClick = { onPromptClick("Explain Quadratic Equation and how to solve it") }
             )
             PromptActionChip(
-                icon = "📝",
-                text = "Take a practice quiz on algebra",
-                onClick = { onPromptClick("Give me a quick practice quiz") }
+                icon = "⚡",
+                text = "Compare FastAPI vs Node.js vs Django",
+                onClick = { onPromptClick("Compare FastAPI, Node.js, and Django with key differences") }
             )
         }
     }
@@ -1219,26 +1269,6 @@ fun StudyExplanationCard(
                             modifier = Modifier.size(18.dp)
                         )
                     }
-                }
-
-                // Take Practice Quiz Button
-                TextButton(
-                    onClick = onTakeQuiz,
-                    colors = ButtonDefaults.textButtonColors(
-                        contentColor = Color(0xFF4F46E5)
-                    )
-                ) {
-                    Text(
-                        text = "Take Practice Quiz",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 13.sp
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp)
-                    )
                 }
             }
         }

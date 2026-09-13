@@ -303,8 +303,10 @@ fun NavGraph(
                         if (activeSession == null || explanationResult == null) {
                             actualViewModel.explainCurrentCapture(customText = caption, image = bitmap)
                         } else {
-                            actualViewModel.startNewSession()
-                            actualViewModel.explainCurrentCapture(customText = caption, image = bitmap)
+                            actualViewModel.askFollowUp(
+                                question = if (caption.isNotBlank()) caption else "Explain this uploaded image in detail.",
+                                image = bitmap
+                            )
                         }
                     },
                     selectedIntent = selectedIntent,
