@@ -9,6 +9,7 @@ import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -35,6 +36,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.studylens.ai.RetrievalClient
+import com.studylens.ai.StructuredStudyResponseParser
 import com.studylens.shared.FormulaCodeBlock
 import com.studylens.shared.QuickCheckQuestion
 import com.studylens.shared.StructuredStudyResponse
@@ -43,8 +46,8 @@ import com.studylens.shared.VerifiedCitation
 import com.studylens.ui.FollowUpMessage
 
 /**
- * Enterprise Intent Selector Bar: Allows the student to select their desired pedagogical
- * learning mode or leave it on "Auto".
+ * Enterprise Intent Selector Bar (ChatGPT Mobile Style):
+ * Allows the student to switch pedagogical intent with sleek pill buttons.
  */
 @Composable
 fun IntentSelectorStrip(
@@ -58,34 +61,31 @@ fun IntentSelectorStrip(
         modifier = modifier
             .fillMaxWidth()
             .horizontalScroll(scrollState)
-            .padding(horizontal = 4.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+            .padding(vertical = 2.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         StudyIntent.values().forEach { intent ->
             val isSelected = intent == selectedIntent
             Surface(
                 onClick = { onSelectIntent(intent) },
-                shape = RoundedCornerShape(20.dp),
-                color = if (isSelected) Color(0xFF4F46E5) else Color.White,
-                border = if (isSelected) null else ButtonDefaults.outlinedButtonBorder.copy(
-                    brush = Brush.horizontalGradient(listOf(Color(0xFFE2E8F0), Color(0xFFCBD5E1))),
-                    width = 1.dp
-                ),
-                shadowElevation = if (isSelected) 3.dp else 1.dp
+                shape = RoundedCornerShape(16.dp),
+                color = if (isSelected) Color(0xFF1E1B4B) else Color.White,
+                border = if (isSelected) null else BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                shadowElevation = if (isSelected) 1.dp else 0.dp
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
                         text = intent.icon,
-                        fontSize = 13.sp
+                        fontSize = 12.sp
                     )
-                    Spacer(modifier = Modifier.width(6.dp))
+                    Spacer(modifier = Modifier.width(5.dp))
                     Text(
                         text = intent.displayName,
-                        color = if (isSelected) Color.White else Color(0xFF334155),
+                        color = if (isSelected) Color.White else Color(0xFF475569),
                         fontSize = 12.sp,
                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                     )
@@ -453,11 +453,22 @@ fun StructuredExplanationCard(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val title = response?.title?.ifBlank { fallbackTitle } ?: fallbackTitle
-    val subject = response?.subject ?: "General Study"
-    val intent = response?.intent ?: StudyIntent.CONCEPT_EXPLANATION
-    val coreText = response?.coreConcept?.ifBlank { fallbackExplanation } ?: fallbackExplanation
-    val activeCitations = response?.citations?.takeIf { it.isNotEmpty() } ?: citations
+    val effectiveResponse = response ?: remember(fallbackExplanation, fallbackTitle, citations) {
+        StructuredStudyResponseParser.parse(
+            rawOutput = fallbackExplanation,
+            fallbackTopic = fallbackTitle,
+            inferredIntent = StudyIntent.CONCEPT_EXPLANATION,
+            citations = citations
+        )
+    }
+
+    val title = effectiveResponse.title.ifBlank { fallbackTitle }
+    val subject = effectiveResponse.subject
+    val intent = effectiveResponse.intent
+    val coreText = effectiveResponse.coreConcept.ifBlank { fallbackExplanation }
+    val activeCitations = effectiveResponse.citations.ifEmpty { citations }.ifEmpty {
+        RetrievalClient.resolveDefaultEducationalCitations(title)
+    }
 
     Surface(
         modifier = modifier.fillMaxWidth(),
@@ -540,7 +551,23 @@ fun StructuredExplanationCard(
                 fontWeight = FontWeight.Bold
             )
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // ChatGPT Section 1: Overview & Definition Header
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(bottom = 6.dp)
+            ) {
+                Text(text = "🎯", fontSize = 13.sp)
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "OVERVIEW & DEFINITION",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF4F46E5),
+                    letterSpacing = 0.5.sp
+                )
+            }
 
             // Core Principle / Concept
             Text(
@@ -550,20 +577,20 @@ fun StructuredExplanationCard(
                 lineHeight = 22.sp
             )
 
-            // Formula / Code Box if available
-            response?.formulaOrCode?.let { formulaBlock ->
+            // ChatGPT Section 2: Formula / Code Box if available
+            effectiveResponse.formulaOrCode?.let { formulaBlock ->
                 Spacer(modifier = Modifier.height(14.dp))
                 FormulaCodeBlockView(block = formulaBlock)
             }
 
-            // Step-by-Step Breakdown if available
-            response?.steps?.takeIf { it.isNotEmpty() }?.let { stepsList ->
+            // ChatGPT Section 3: Step-by-Step Breakdown if available
+            effectiveResponse.steps.takeIf { it.isNotEmpty() }?.let { stepsList ->
                 Spacer(modifier = Modifier.height(14.dp))
                 StepTimelineView(steps = stepsList)
             }
 
-            // Real-World Analogy Callout
-            response?.analogy?.let { analogyText ->
+            // ChatGPT Section 4: Real-World Analogy Callout
+            effectiveResponse.analogy?.let { analogyText ->
                 Spacer(modifier = Modifier.height(14.dp))
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
@@ -597,8 +624,8 @@ fun StructuredExplanationCard(
                 }
             }
 
-            // Common Pitfalls Callout
-            response?.commonPitfalls?.takeIf { it.isNotEmpty() }?.let { pitfallsList ->
+            // ChatGPT Section 5: Common Pitfalls Callout
+            effectiveResponse.commonPitfalls.takeIf { it.isNotEmpty() }?.let { pitfallsList ->
                 Spacer(modifier = Modifier.height(14.dp))
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
@@ -641,13 +668,13 @@ fun StructuredExplanationCard(
                 }
             }
 
-            // Interactive Quick Check Question
-            response?.quickCheck?.let { qc ->
+            // ChatGPT Section 6: Interactive Quick Check Question
+            effectiveResponse.quickCheck?.let { qc ->
                 Spacer(modifier = Modifier.height(14.dp))
                 QuickCheckCard(question = qc)
             }
 
-            // Verified Academic Sources Strip
+            // ChatGPT Section 7: Verified Academic Sources Strip
             if (activeCitations.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(14.dp))
                 VerifiedSourcesStrip(citations = activeCitations)

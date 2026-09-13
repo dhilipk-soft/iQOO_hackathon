@@ -111,4 +111,27 @@ class StructuredEducationalOutputTest {
         assertEquals("MIT OpenCourseWare", mitDomain)
         assertTrue(isEduMit)
     }
+
+    @Test
+    fun testStructuredResponseParser_fastApiQuery_generatesCodeAndGuaranteedCitations() {
+        val rawLlmParagraph = "Fast API is a web framework that enables the development of APIs by allowing developers to define request parameters, bodies, and responses with type annotations. It utilizes asynchronous endpoints using async/await and supports both synchronous and non-blocking I/O operations. Fast API integrates with popular Python tools and libraries such as SQLAlchemy, Tortoise ORM, JWT authentication, and dependency injection systems, making it easier to isolate concerns and testability. Additionally, it emphasizes standards-based design and promotes interoperability, which encourages faster development and adoption."
+
+        val parsed = StructuredStudyResponseParser.parse(
+            rawOutput = rawLlmParagraph,
+            fallbackTopic = "What is fast api",
+            inferredIntent = StudyIntent.CONCEPT_EXPLANATION
+        )
+
+        assertEquals("Computer Science", parsed.subject)
+        assertTrue(parsed.coreConcept.isNotBlank())
+        assertNotNull(parsed.formulaOrCode)
+        assertTrue(parsed.formulaOrCode!!.isCode)
+        assertTrue(parsed.formulaOrCode!!.content.contains("FastAPI"))
+        assertTrue(parsed.steps.isNotEmpty())
+        assertNotNull(parsed.analogy)
+        assertTrue(parsed.commonPitfalls.isNotEmpty())
+        assertNotNull(parsed.quickCheck)
+        assertTrue(parsed.citations.isNotEmpty())
+        assertTrue(parsed.citations.any { it.domain.contains("FastAPI") || it.url.contains("fastapi") })
+    }
 }

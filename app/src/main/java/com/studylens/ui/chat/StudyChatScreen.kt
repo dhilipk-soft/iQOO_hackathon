@@ -683,7 +683,7 @@ fun StudyChatScreen(
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(horizontal = 16.dp),
-                        contentPadding = PaddingValues(top = 12.dp, bottom = 120.dp),
+                        contentPadding = PaddingValues(top = 12.dp, bottom = 175.dp),
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
                         // Structured Topic Explanation Card
@@ -756,107 +756,121 @@ fun StudyChatScreen(
                     }
                 }
 
-                // Bottom Area: Attached Image Chip + Bottom Pill Input Bar
-                Column(
+                // Bottom Dock Container (ChatGPT Floating Style with top gradient fade)
+                Box(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 10.dp)
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(
+                                    Color.Transparent,
+                                    Color(0xFFF8F9FE).copy(alpha = 0.92f),
+                                    Color(0xFFF8F9FE),
+                                    Color(0xFFF8F9FE)
+                                )
+                            )
+                        )
+                        .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 10.dp)
                 ) {
-                    // Attachment & Photo Preview Banner
-                    AnimatedVisibility(visible = stagedImage != null || isProcessingOcr) {
-                        Surface(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(bottom = 6.dp),
-                            shape = RoundedCornerShape(16.dp),
-                            color = Color.White,
-                            border = ButtonDefaults.outlinedButtonBorder.copy(
-                                brush = Brush.horizontalGradient(listOf(Color(0xFF818CF8), Color(0xFF4F46E5))),
-                                width = 1.dp
-                            ),
-                            shadowElevation = 2.dp
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                    Column(
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        // Attachment & Photo Preview Banner
+                        AnimatedVisibility(visible = stagedImage != null || isProcessingOcr) {
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 6.dp),
+                                shape = RoundedCornerShape(16.dp),
+                                color = Color.White,
+                                border = ButtonDefaults.outlinedButtonBorder.copy(
+                                    brush = Brush.horizontalGradient(listOf(Color(0xFF818CF8), Color(0xFF4F46E5))),
+                                    width = 1.dp
+                                ),
+                                shadowElevation = 2.dp
                             ) {
-                                if (isProcessingOcr) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(16.dp).padding(start = 4.dp),
-                                        color = Color(0xFF4F46E5),
-                                        strokeWidth = 2.dp
-                                    )
-                                    Spacer(modifier = Modifier.width(10.dp))
-                                    Text(
-                                        text = ocrStatusText,
-                                        color = Color(0xFF4F46E5),
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                } else {
-                                    stagedImage?.let { bmp ->
-                                        Image(
-                                            bitmap = bmp.asImageBitmap(),
-                                            contentDescription = "Attached photo",
-                                            contentScale = ContentScale.Crop,
-                                            modifier = Modifier
-                                                .size(40.dp)
-                                                .clip(RoundedCornerShape(8.dp))
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    if (isProcessingOcr) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(16.dp).padding(start = 4.dp),
+                                            color = Color(0xFF4F46E5),
+                                            strokeWidth = 2.dp
                                         )
-                                    }
-                                    Spacer(modifier = Modifier.width(10.dp))
-                                    Text(
-                                        text = "Photo attached • type a question below, or just send",
-                                        color = Color(0xFF1E1B4B),
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    IconButton(
-                                        onClick = { stagedImage = null },
-                                        modifier = Modifier.size(24.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Close,
-                                            contentDescription = "Remove",
-                                            tint = Color(0xFF94A3B8),
-                                            modifier = Modifier.size(16.dp)
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Text(
+                                            text = ocrStatusText,
+                                            color = Color(0xFF4F46E5),
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Medium
                                         )
+                                    } else {
+                                        stagedImage?.let { bmp ->
+                                            Image(
+                                                bitmap = bmp.asImageBitmap(),
+                                                contentDescription = "Attached photo",
+                                                contentScale = ContentScale.Crop,
+                                                modifier = Modifier
+                                                    .size(40.dp)
+                                                    .clip(RoundedCornerShape(8.dp))
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Text(
+                                            text = "Photo attached • type a question below, or just send",
+                                            color = Color(0xFF1E1B4B),
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        IconButton(
+                                            onClick = { stagedImage = null },
+                                            modifier = Modifier.size(24.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Close,
+                                                contentDescription = "Remove",
+                                                tint = Color(0xFF94A3B8),
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
                                     }
                                 }
                             }
                         }
+
+                        // Pedagogical Intent Selector Bar (ChatGPT Mobile Style)
+                        IntentSelectorStrip(
+                            selectedIntent = selectedIntent,
+                            onSelectIntent = onSelectIntent,
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        )
+
+                        // Bottom Pill Input Bar (Reference Image 2 ChatGPT Style)
+                        BottomStudyInputBar(
+                            inputText = inputText,
+                            onTextChange = { inputText = it },
+                            onSend = {
+                                val photo = stagedImage
+                                if (photo != null) {
+                                    onExplainImage(photo, inputText.trim())
+                                    stagedImage = null
+                                    inputText = ""
+                                } else if (inputText.isNotBlank()) {
+                                    onAskQuestion(inputText)
+                                    inputText = ""
+                                }
+                            },
+                            onOpenPlus = { showMediaSheet = true },
+                            onVoiceTap = {
+                                inputText = "What is the discriminant formula?"
+                            },
+                            isMultimodalSupported = isMultimodalSupported
+                        )
                     }
-
-                    // Pedagogical Intent Selector Bar
-                    IntentSelectorStrip(
-                        selectedIntent = selectedIntent,
-                        onSelectIntent = onSelectIntent,
-                        modifier = Modifier.padding(bottom = 6.dp)
-                    )
-
-                    // Bottom Pill Input Bar (Reference Image 2 ChatGPT Style)
-                    BottomStudyInputBar(
-                        inputText = inputText,
-                        onTextChange = { inputText = it },
-                        onSend = {
-                            val photo = stagedImage
-                            if (photo != null) {
-                                onExplainImage(photo, inputText.trim())
-                                stagedImage = null
-                                inputText = ""
-                            } else if (inputText.isNotBlank()) {
-                                onAskQuestion(inputText)
-                                inputText = ""
-                            }
-                        },
-                        onOpenPlus = { showMediaSheet = true },
-                        onVoiceTap = {
-                            inputText = "What is the discriminant formula?"
-                        },
-                        isMultimodalSupported = isMultimodalSupported
-                    )
                 }
 
                 // Media / Photos Bottom Sheet (Camera & Gallery Options)
@@ -967,7 +981,7 @@ fun EmptyStudyCanvas(
         Column(
             verticalArrangement = Arrangement.spacedBy(10.dp),
             modifier = Modifier
-                .padding(bottom = 90.dp)
+                .padding(bottom = 165.dp)
         ) {
             if (isMultimodalSupported) {
                 PromptActionChip(

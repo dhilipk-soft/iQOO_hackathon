@@ -8,7 +8,9 @@ object StudyIntentClassifier {
         "python", "kotlin", "java", "c++", "javascript", "typescript", "swift",
         "algorithm", "complexity", "big o", "recursion", "array", "linked list",
         "binary search", "sorting", "hashmap", "function", "class", "syntax",
-        "loop", "pointer", "compile", "runtime", "data structure", "debugging"
+        "loop", "pointer", "compile", "runtime", "data structure", "debugging",
+        "fastapi", "react", "api", "endpoint", "framework", "backend", "frontend",
+        "database", "sql", "git", "django", "flask", "node", "express"
     )
 
     private val SOLVER_KEYWORDS = setOf(
@@ -84,7 +86,9 @@ object StudyIntentClassifier {
             lower.contains("triangle") || lower.contains("circle") || lower.contains("angle") ||
                     lower.contains("geometry") -> "Geometry"
             lower.contains("python") || lower.contains("algorithm") || lower.contains("code") ||
-                    lower.contains("function") || lower.contains("programming") -> "Computer Science"
+                    lower.contains("function") || lower.contains("programming") || lower.contains("fastapi") ||
+                    lower.contains("fast api") || lower.contains("api") || lower.contains("react") ||
+                    lower.contains("backend") || lower.contains("frontend") || lower.contains("sql") -> "Computer Science"
             lower.contains("molecule") || lower.contains("reaction") || lower.contains("acid") ||
                     lower.contains("chemistry") || lower.contains("element") -> "Chemistry"
             lower.contains("history") || lower.contains("revolution") || lower.contains("war") ||
