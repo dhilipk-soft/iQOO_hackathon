@@ -466,8 +466,10 @@ fun StructuredExplanationCard(
     val subject = effectiveResponse.subject
     val intent = effectiveResponse.intent
     val coreText = effectiveResponse.coreConcept.ifBlank { fallbackExplanation }
-    val activeCitations = effectiveResponse.citations.ifEmpty { citations }.ifEmpty {
-        RetrievalClient.resolveDefaultEducationalCitations(title)
+    val activeCitations = if (usedOnlineContext) {
+        effectiveResponse.citations.ifEmpty { citations }
+    } else {
+        emptyList()
     }
 
     Surface(
@@ -674,8 +676,8 @@ fun StructuredExplanationCard(
                 QuickCheckCard(question = qc)
             }
 
-            // ChatGPT Section 7: Verified Academic Sources Strip
-            if (activeCitations.isNotEmpty()) {
+            // ChatGPT Section 7: Verified Academic Sources Strip (Online research only)
+            if (usedOnlineContext && activeCitations.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(14.dp))
                 VerifiedSourcesStrip(citations = activeCitations)
             }

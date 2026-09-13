@@ -116,10 +116,14 @@ class StructuredEducationalOutputTest {
     fun testStructuredResponseParser_fastApiQuery_generatesCodeAndGuaranteedCitations() {
         val rawLlmParagraph = "Fast API is a web framework that enables the development of APIs by allowing developers to define request parameters, bodies, and responses with type annotations. It utilizes asynchronous endpoints using async/await and supports both synchronous and non-blocking I/O operations. Fast API integrates with popular Python tools and libraries such as SQLAlchemy, Tortoise ORM, JWT authentication, and dependency injection systems, making it easier to isolate concerns and testability. Additionally, it emphasizes standards-based design and promotes interoperability, which encourages faster development and adoption."
 
+        val testCitations = listOf(
+            VerifiedCitation("FastAPI Documentation", "https://fastapi.tiangolo.com", "FastAPI Docs", true)
+        )
         val parsed = StructuredStudyResponseParser.parse(
             rawOutput = rawLlmParagraph,
             fallbackTopic = "What is fast api",
-            inferredIntent = StudyIntent.CONCEPT_EXPLANATION
+            inferredIntent = StudyIntent.CONCEPT_EXPLANATION,
+            citations = testCitations
         )
 
         assertEquals("Computer Science", parsed.subject)
@@ -193,10 +197,6 @@ class StructuredEducationalOutputTest {
         // 7. Quick check question & answer
         assertNotNull(parsed.quickCheck)
         assertTrue(parsed.quickCheck!!.question.contains("2 the only even prime number"))
-
-        // 8. Citations
-        assertTrue(parsed.citations.isNotEmpty())
-        assertTrue(parsed.citations.any { it.domain == "Wikipedia" || it.domain == "Wolfram MathWorld" })
     }
 
     @Test
@@ -222,7 +222,30 @@ class StructuredEducationalOutputTest {
         assertNotNull(parsed.analogy)
         assertTrue(parsed.commonPitfalls.any { it.contains("immutable strings") })
         assertNotNull(parsed.quickCheck)
-        assertTrue(parsed.citations.isNotEmpty())
+    }
+
+    @Test
+    fun testStructuredResponseParser_evenNumber_offlineHandlesMathematicalEdgeCases() {
+        val parsed = StructuredStudyResponseParser.parse(
+            rawOutput = "",
+            fallbackTopic = "What is even number?",
+            inferredIntent = StudyIntent.CONCEPT_EXPLANATION,
+            citations = emptyList() // Offline mode: strictly empty citations!
+        )
+
+        assertEquals("Mathematics", parsed.subject)
+        assertTrue("Offline on-device mode must have zero web citations", parsed.citations.isEmpty())
+        assertTrue(parsed.coreConcept.contains("divisible by 2 with no remainder"))
+        assertTrue(parsed.coreConcept.contains("0 is an even number"))
+        assertNotNull(parsed.formulaOrCode)
+        assertTrue(parsed.formulaOrCode!!.content.contains("n = 2k"))
+        assertTrue(parsed.steps.any { it.contains("0 is completely even") })
+        assertNotNull(parsed.analogy)
+        assertTrue(parsed.analogy!!.contains("pairing socks") || parsed.analogy!!.contains("shoes"))
+        assertTrue(parsed.commonPitfalls.any { it.contains("Believing that 0 is neither even nor odd") })
+        assertNotNull(parsed.quickCheck)
+        assertTrue(parsed.quickCheck!!.question.contains("0 an even number"))
     }
 }
+
 

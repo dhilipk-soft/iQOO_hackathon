@@ -364,6 +364,7 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun startNewSession() {
+        llmEngine.resetConversation()
         _activeSession.value = null
         _capturedText.value = ""
         _explanationResult.value = null
@@ -378,6 +379,7 @@ class StudyViewModel(application: Application) : AndroidViewModel(application) {
     // image != null means multimodal - the photo goes straight to the model, no OCR step.
     // customText/capturedText can legitimately be blank in that case.
     fun explainCurrentCapture(customText: String? = null, image: Bitmap? = null) {
+        llmEngine.resetConversation()
         val textToProcess = customText?.ifBlank { null }
             ?: _capturedText.value.ifBlank { if (image != null) "" else "General Study Topic" }
         _capturedText.value = textToProcess

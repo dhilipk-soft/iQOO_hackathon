@@ -2,6 +2,7 @@ package com.studylens.ai
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.util.Log
 import com.google.ai.edge.litertlm.Backend
 import com.google.ai.edge.litertlm.Content
 import com.google.ai.edge.litertlm.Contents
@@ -93,6 +94,22 @@ class LlmEngine(private val context: Context) {
         }
     }
 
+    /**
+     * Closes and resets only the active conversation/session buffer without unloading the
+     * heavy model weights from memory. This ensures each new question starts with a fresh
+     * token context and discards any corrupted conversation state.
+     */
+    fun resetConversation() {
+        synchronized(this) {
+            when (val handle = chatHandle) {
+                is ChatHandle.ViaConversation -> try { handle.conversation.close() } catch (_: Exception) {}
+                is ChatHandle.ViaSession -> try { handle.session.close() } catch (_: Exception) {}
+                null -> Unit
+            }
+            chatHandle = null
+        }
+    }
+
     // NPU deliberately left out: this build has no Qualcomm QNN/QAIRT dispatch library or
     // compiler plugin bundled (confirmed via logcat - "No dispatch library found", "No
     // compiler plugin found"), and the downloaded models carry no TF_LITE_AUX NPU section
@@ -144,7 +161,7 @@ class LlmEngine(private val context: Context) {
                         // "Must be GPU for Gemma 3n" (Google's own comment) doesn't apply here -
                         // this app uses Qwen2-VL-2B, not Gemma 3n.
                         visionBackend = Backend.CPU(),
-                        maxNumTokens = 1536
+                        maxNumTokens = 2048
                     )
                     val newEngine = Engine(config)
                     newEngine.initialize()
@@ -247,46 +264,58 @@ class LlmEngine(private val context: Context) {
     }
 
     private suspend fun generateViaConversation(conv: Conversation, prompt: String, image: Bitmap?): String {
-        val contents = mutableListOf<Content>()
-        if (image != null) {
-            // Camera/gallery photos can be 8-12MP - feeding that straight into the vision
-            // encoder is what was hanging the GPU for 10s+ and freezing the UI (fence
-            // timeouts, "Failed to lock tensor buffer" in logcat). Downscaling first keeps
-            // the vision encoder's input in the size range it actually expects.
-            contents.add(Content.ImageBytes(image.downscaleForVisionModel().toPngByteArray()))
-        }
-        if (prompt.isNotBlank()) {
-            contents.add(Content.Text(prompt))
-        }
-
         val result = withTimeoutOrNull(VISION_TIMEOUT_MS) {
             suspendCancellableCoroutine { cont ->
                 val response = StringBuilder()
-                conv.sendMessageAsync(
-                    Contents.of(contents),
-                    object : MessageCallback {
-                        override fun onMessage(message: Message) {
+                val callback = object : MessageCallback {
+                    override fun onMessage(message: Message) {
+                        val text = try {
+                            message.contents.contents.filterIsInstance<Content.Text>().joinToString("") { it.text }
+                        } catch (_: Exception) {
+                            ""
+                        }
+                        if (text.isNotBlank()) {
+                            response.append(text)
+                        } else {
                             response.append(message.toString())
                         }
+                    }
 
-                        override fun onDone() {
-                            if (cont.isActive) cont.resume(response.toString())
-                        }
+                    override fun onDone() {
+                        if (cont.isActive) cont.resume(response.toString())
+                    }
 
-                        override fun onError(throwable: Throwable) {
-                            if (cont.isActive) {
-                                cont.resume("Sorry, I couldn't generate an explanation just now. Please try again.")
-                            }
+                    override fun onError(throwable: Throwable) {
+                        Log.e("LlmEngine", "LiteRT-LM conversation error: ${throwable.message}", throwable)
+                        resetConversation()
+                        if (cont.isActive) {
+                            cont.resume("Sorry, I couldn't generate an explanation just now. Please try again.")
                         }
-                    },
-                    emptyMap()
-                )
+                    }
+                }
+
+                if (image != null) {
+                    val contents = mutableListOf<Content>()
+                    contents.add(Content.ImageBytes(image.downscaleForVisionModel().toPngByteArray()))
+                    if (prompt.isNotBlank()) {
+                        contents.add(Content.Text(prompt))
+                    }
+                    conv.sendMessageAsync(
+                        Contents.of(contents),
+                        callback,
+                        emptyMap()
+                    )
+                } else {
+                    conv.sendMessageAsync(
+                        prompt,
+                        callback,
+                        emptyMap()
+                    )
+                }
             }
         }
         return result ?: run {
-            // The model/GPU hung past the timeout - drop this conversation so the next
-            // attempt starts clean instead of piling onto a stuck backend.
-            invalidate()
+            resetConversation()
             if (image != null) {
                 "This device's GPU is taking too long to read that photo. Try a clearer, closer photo of just the problem, or ask as a text question instead."
             } else {
